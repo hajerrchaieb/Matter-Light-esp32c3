@@ -54,7 +54,23 @@ jobs:
           pip3 install bandit
 
       - name: Validate Workflow YAML
-        run: yamllint -d relaxed .github/workflows/
+        run: |
+          cat > /tmp/.yamllint << 'YEOF'
+          extends: default
+          rules:
+            line-length:
+              max: 200
+              level: warning
+            truthy:
+              allowed-values: ['true', 'false', 'on', 'off']
+              check-keys: false
+            brackets:
+              min-spaces-inside: 0
+              max-spaces-inside: 1
+            comments-indentation: disable
+            document-start: disable
+          YEOF
+          yamllint -c /tmp/.yamllint .github/workflows/
 
       - name: Lint Commit Messages
         if: github.event_name == 'pull_request' || github.ref == 'refs/heads/develop'
@@ -762,10 +778,10 @@ jobs:
       - test-and-quality
       - firmware-security-audit
     outputs:
-      ai_passed:      ${{ steps.run_agents.outputs.ai_passed }}
+      ai_passed: ${{ steps.run_agents.outputs.ai_passed }}
       security_score: ${{ steps.run_agents.outputs.security_score }}
-      quality_score:  ${{ steps.run_agents.outputs.quality_score }}
-      patches_count:  ${{ steps.run_agents.outputs.patches_count }}
+      quality_score: ${{ steps.run_agents.outputs.quality_score }}
+      patches_count: ${{ steps.run_agents.outputs.patches_count }}
 
     steps:
       - name: Checkout
@@ -1049,7 +1065,7 @@ jobs:
       needs.ai-agents.result == 'success' &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     outputs:
-      build_status:    ${{ steps.rebuild.outputs.build_status }}
+      build_status: ${{ steps.rebuild.outputs.build_status }}
       patches_applied: ${{ steps.apply.outputs.patches_applied }}
 
     steps:
@@ -1419,7 +1435,7 @@ jobs:
     environment: production
     outputs:
       version: ${{ steps.version.outputs.version }}
-      tag:     ${{ steps.version.outputs.tag }}
+      tag: ${{ steps.version.outputs.tag }}
 
     steps:
       - name: Checkout
@@ -1530,8 +1546,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name:  ${{ steps.version.outputs.tag }}
-          name:      "${{ steps.version.outputs.version }} — ESP32 Matter Light"
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "${{ steps.version.outputs.version }} — ESP32 Matter Light"
           body_path: CHANGELOG_LATEST.md
           body: |
             ## ESP32 Matter Light Firmware — ${{ steps.version.outputs.version }}
@@ -1605,7 +1621,7 @@ jobs:
           | Build Firmware          | $(result_icon "${{ needs.build.result }}") |
           | Test & Quality Gate     | $(result_icon "${{ needs.test-and-quality.result }}") |
           | Firmware Security Audit | $(result_icon "${{ needs.firmware-security-audit.result }}") |
-          | AI Agent Analysis       | $(result_icon "${{ needs.ai-agents.result }}") — Security: ${{ needs.ai-agents.outputs.security_score }}/10 Quality: ${{ needs.ai-agents.outputs.quality_score }}/10 |
+          | AI Agent Analysis       | $(result_icon "${{ needs.ai-agents.result }}") Sec:${{ needs.ai-agents.outputs.security_score }}/10 Qual:${{ needs.ai-agents.outputs.quality_score }}/10 |
           | AutoFix Rebuild (4b)    | $(result_icon "${{ needs.build-second-run.result }}") |
           | Full Second Run (4c)    | $(result_icon "${{ needs.full-second-run.result }}") |
           | Release                 | $(result_icon "${{ needs.release.result }}") |
@@ -1871,4 +1887,4 @@ jobs:
           [ "$OVERALL" = "failure" ] && \
             echo "::error::One or more critical stages failed" && exit 1
           echo "Full DevSecOps loop with AI agents + QEMU + AutoFix completed"
-                  
+          
