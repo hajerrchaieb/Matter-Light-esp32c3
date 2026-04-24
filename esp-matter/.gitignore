@@ -1,0 +1,13 @@
+# Fichiers de build ESP-IDF (ne pas commiter)
+build/
+sdkconfig
+sdkconfig.old
+*.o
+*.a
+*.elf
+*.bin
+*.map
+*.d
+*.cmake
+CMakeCache.txt
+CMakeFiles/
