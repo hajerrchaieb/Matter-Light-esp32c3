@@ -44,65 +44,72 @@ env:
 # ════════════════════════════════════════════════════════════════════
 jobs:
   lint-and-validate:
-    name: 🔵 Stage 1 — Plan & Code Quality
+    name: Stage 1 — Plan & Code Quality
     runs-on: ubuntu-latest
-    continue-on-error: true   # 🔥 NEVER block pipeline
-
     steps:
-      - name: 📥 Checkout
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 🛠️ Install linting tools
+      - name: Install linting tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y yamllint cppcheck flawfinder clang-format python3-pip
           pip3 install bandit
 
-      # ✅ FIX 1 — yamllint NON-BLOCKING
-      - name: 🗂️ Validate Workflow YAML
+      - name: Validate Workflow YAML
         run: |
-          yamllint -d relaxed .github/workflows/ || true
+          cat > /tmp/.yamllint << 'YEOF'
+          extends: default
+          rules:
+            line-length:
+              max: 200
+              level: warning
+            truthy:
+              allowed-values: ['true', 'false', 'on', 'off']
+              check-keys: false
+            brackets:
+              min-spaces-inside: 0
+              max-spaces-inside: 1
+            comments-indentation: disable
+            document-start: disable
+          YEOF
+          yamllint -c /tmp/.yamllint .github/workflows/
 
-      - name: 📝 Lint Commit Messages
+      - name: Lint Commit Messages
         if: github.event_name == 'pull_request' || github.ref == 'refs/heads/develop'
-        uses: wagoid/commitlint-github-action@v5
-        continue-on-error: true   # 🔥 don't block
+        uses: wagoid/commitlint-github-action@v6
 
-      - name: 🔍 Dependency Review (PR only)
+      - name: Dependency Review (PR only)
         if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@v4
-        continue-on-error: true
 
-      - name: 🔗 Check pre-commit config
+      - name: Check pre-commit config
         run: |
           mkdir -p ${{ env.REPORTS_DIR }}
           if [ ! -f .pre-commit-config.yaml ]; then
-            echo "::warning::No .pre-commit-config.yaml found — add one for local enforcement"
+            echo "::warning::No .pre-commit-config.yaml found"
           else
-            echo "✅ pre-commit config found"
+            echo "pre-commit config found"
           fi
 
-      # ✅ FIX 2 — clang-format NO FAIL
-      - name: 🎨 Clang-Format Check
+      - name: Clang-Format Check
         run: |
           if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
             UNFORMATTED=$(find ${{ env.EXAMPLE_PATH }} \
               \( -name "*.c" -o -name "*.cpp" -o -name "*.h" \) \
-              | xargs clang-format --dry-run 2>&1 | wc -l)
-
+              | xargs clang-format --dry-run --Werror 2>&1 | grep "^" | wc -l)
             if [ "$UNFORMATTED" -gt "0" ]; then
-              echo "::warning::$UNFORMATTED file(s) have formatting issues — run clang-format"
+              echo "::warning::$UNFORMATTED file(s) have formatting issues"
             else
-              echo "✅ All files are properly formatted"
+              echo "All files properly formatted"
             fi
           else
-            echo "Source path not found: ${{ env.EXAMPLE_PATH }} — skipping clang-format"
+            echo "Source path not found — skipping clang-format"
           fi
 
-      # ✅ FIX 3 — Bandit NON-BLOCKING (already almost ok)
-      - name: 🔐 Python Security Scan (Bandit)
+      - name: Python Security Scan (Bandit)
         run: |
           if find . -name "*.py" -not -path "./.git/*" | grep -q .; then
             bandit -r . --exclude './.git,./build' -lll -f json \
@@ -113,8 +120,7 @@ jobs:
               | tee ${{ env.REPORTS_DIR }}/bandit-report.json
           fi
 
-      # ✅ FIX 4 — cppcheck NEVER FAIL
-      - name: 🔍 cppcheck Early Static Analysis
+      - name: cppcheck Early Static Analysis
         run: |
           if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
             cppcheck \
@@ -123,15 +129,14 @@ jobs:
               --error-exitcode=0 \
               --xml --xml-version=2 \
               ${{ env.EXAMPLE_PATH }} \
-              2> ${{ env.REPORTS_DIR }}/cppcheck-report.xml || true
-
+              2> ${{ env.REPORTS_DIR }}/cppcheck-report.xml
             flawfinder --html ${{ env.EXAMPLE_PATH }} \
               > ${{ env.REPORTS_DIR }}/flawfinder-report.html || true
           else
-            echo "Source path not found: ${{ env.EXAMPLE_PATH }}"
+            echo "Source path not found"
           fi
 
-      - name: 📤 Upload lint reports
+      - name: Upload lint reports
         uses: actions/upload-artifact@v4
         with:
           name: lint-reports
@@ -161,8 +166,17 @@ jobs:
 
       - name: Secret Scan (Gitleaks)
         run: |
+          # Exclude .env and reports/ from scan (contain runtime-generated secrets)
+          # Create .gitleaksignore if not present
+          if [ ! -f .gitleaksignore ]; then
+            printf '.env\nreports/\n.autofix-reports/\n'               > /tmp/.gitleaksignore
+            IGNORE_FLAG="--gitleaks-ignore-path=/tmp/.gitleaksignore"
+          else
+            IGNORE_FLAG="--gitleaks-ignore-path=.gitleaksignore"
+          fi
           gitleaks detect \
             --source . \
+            $IGNORE_FLAG \
             --report-format=json \
             --report-path=${{ env.REPORTS_DIR }}/gitleaks-report.json \
             --redact || true
@@ -256,7 +270,7 @@ jobs:
           exit-code: '0'
 
       - name: Upload Trivy SARIF to Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-image.sarif
         continue-on-error: true
@@ -591,8 +605,7 @@ jobs:
       - name: Quality Gate — Enforce cppcheck
         run: |
           if [ -f ${{ env.REPORTS_DIR }}/cppcheck-deep.xml ]; then
-            ERROR_COUNT=$(grep -c 'severity="error"' \
-              ${{ env.REPORTS_DIR }}/cppcheck-deep.xml 2>/dev/null || echo 0)
+            ERROR_COUNT=$(grep -c 'severity="error"'               ${{ env.REPORTS_DIR }}/cppcheck-deep.xml 2>/dev/null || echo 0)
             echo "cppcheck errors: $ERROR_COUNT"
             if [ "$ERROR_COUNT" -gt "0" ]; then
               echo "::error::Quality gate failed — $ERROR_COUNT cppcheck error(s)"
@@ -601,7 +614,9 @@ jobs:
               echo "Quality gate passed"
             fi
           else
-            echo "::warning::cppcheck report not found"
+            echo "::warning::cppcheck report not found (source path missing in runner)"
+            echo "::warning::This is expected when esp-matter source is not in repo"
+            echo "Quality gate: SKIPPED (no source to check)"
           fi
 
       - name: Install clang + fuzzing tools
@@ -794,6 +809,16 @@ jobs:
           path: ${{ env.REPORTS_DIR }}/
         continue-on-error: true
 
+      - name: Init regression history if first run
+        run: |
+          mkdir -p ${{ env.REPORTS_DIR }}
+          if [ ! -f ${{ env.REPORTS_DIR }}/run-history.json ]; then
+            echo '{"runs":[],"run_count":0}'               > ${{ env.REPORTS_DIR }}/run-history.json
+            echo "First run — baseline history created"
+          else
+            echo "History found: $(cat ${{ env.REPORTS_DIR }}/run-history.json               | python3 -c 'import json,sys; d=json.load(sys.stdin);               print(str(d.get("run_count",0)) + " run(s)")')"
+          fi
+
       - name: Download lint reports (Stage 1)
         uses: actions/download-artifact@v4
         with:
@@ -868,7 +893,7 @@ jobs:
 
       - name: Configure agent environment
         run: |
-          printf 'GROQ_API_KEY=%s\n' "${{ secrets.GROQ_API_KEY1 }}" > .env
+          printf 'GROQ_API_KEY=%s\n' "${{ secrets.GROQ_API_KEY }}" > .env
           printf 'LLM_MODEL=llama-3.3-70b-versatile\n' >> .env
           printf 'TARGET_CHIP=esp32c3\n' >> .env
           printf 'EXAMPLE_PATH=%s\n' "${{ env.EXAMPLE_PATH }}" >> .env
@@ -895,7 +920,7 @@ jobs:
 
       - name: Pre-flight check (agents + secrets + files)
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY1 }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           echo "=== Pre-flight check ==="
           # 1. GROQ_API_KEY
@@ -935,7 +960,7 @@ jobs:
       - name: Run AI Agents Orchestrator (Agents 1-8 + AutoFix)
         id: run_agents
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY1 }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TARGET_CHIP: esp32c3
           EXAMPLE_PATH: ${{ env.EXAMPLE_PATH }}
         run: |
@@ -993,8 +1018,6 @@ jobs:
             echo "=== pipeline-summary.json content ==="
             cat ${{ env.REPORTS_DIR }}/pipeline-summary.json 2>/dev/null               | python3 -m json.tool 2>/dev/null || true
           fi
-      - name: Diagnose AI agents
-        run: python3 scripts/diagnose_pipeline.py
 
       - name: Regression Detection
         if: always()
@@ -1049,7 +1072,7 @@ jobs:
             f"| Code Review | {cod.get('score','N/A')}/10 |",
             f"| Security    | {sec.get('score','N/A')}/10 — {sec.get('cves',0)} CVE(s) |",
             f"| Build       | {bld.get('status','?')} |",
-            f"| Memory      | Flash: {mem.get('flash_pct','?')}% |",
+            f"| Memory      | Flash: {mem.get('flash_pct','N/A (no build size report)')}% |",
             f"| AutoFix     | {af.get('patches_generated',0)} patch(es) generated |",
             f"| **Overall** | **{'PASSED' if s.get('pipeline_passed') else 'ISSUES'}** |",
           ]
@@ -1206,9 +1229,9 @@ jobs:
                   NAME=\$(basename \"\$PATCH\")
                   echo \"→ \$NAME\"
                   if git -C /opt/espressif/esp-matter apply --check \
-                       --directory=examples/light/main \"\$PATCH\" 2>/dev/null; then
+                       --directory=examples/light \"\$PATCH\" 2>/dev/null; then
                     git -C /opt/espressif/esp-matter apply \
-                        --directory=examples/light/main \"\$PATCH\"
+                        --directory=examples/light \"\$PATCH\"
                     echo '  OK'
                     APPLIED=\$((APPLIED+1))
                   else
@@ -1313,32 +1336,70 @@ jobs:
           git config user.email "autofix@github-actions.local"
 
           PATCH_DIR="${{ env.REPORTS_DIR }}/patches"
-          APPLIED=0; SKIPPED=0
+          WORKSPACE="${{ github.workspace }}"
 
+          # Step A: Copy ESP-Matter source into the repo (from Docker)
+          # Patches target main/app_main.cpp etc. which only exist in Docker.
+          # We copy the source into the runner's workspace so git can apply.
+          echo "=== Step A: Copy ESP-Matter source from Docker ==="
+          mkdir -p esp-matter/examples/light/main
+          docker pull ${{ env.DOCKER_IMAGE }} 2>/dev/null || true
+          docker run --rm             -v "$WORKSPACE:/workspace"             ${{ env.DOCKER_IMAGE }}             /bin/bash -c "
+              cp -r /opt/espressif/esp-matter/examples/light/main/*                 /workspace/esp-matter/examples/light/main/ 2>/dev/null || true
+            "
+          SOURCE_FILES=$(ls esp-matter/examples/light/main/ 2>/dev/null | wc -l)
+          echo "Source files copied: $SOURCE_FILES"
+
+          if [ "$SOURCE_FILES" -eq "0" ]; then
+            echo "::warning::No source files copied — patches cannot be applied"
+            echo "applied=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Step B: Add source to git so patches can be tracked
+          git add esp-matter/ 2>/dev/null || true
+
+          # Step C: Apply each patch
+          # Use `patch` command (not git apply) because source files were just
+          # copied from Docker and may not be in git index yet.
+          # Patch format: --- a/main/app_main.cpp → strip=2 (a/ + main/)
+          # with -d esp-matter/examples/light → resolves to main/app_main.cpp
+          APPLIED=0; SKIPPED=0
           if [ -d "$PATCH_DIR" ] && ls "$PATCH_DIR"/*.patch 2>/dev/null; then
-            echo "=== Applying patches to local repo ==="
+            echo "=== Step C: Applying patches ==="
             for PATCH in "$PATCH_DIR"/*.patch; do
               NAME=$(basename "$PATCH")
               echo "→ $NAME"
-              # Essai 1 : direct
-              if git apply --check "$PATCH" 2>/dev/null; then
-                git apply "$PATCH"
-                echo "  OK (direct)"
+              # Show patch header for debug
+              head -5 "$PATCH" || true
+
+              # Method 1: patch -p1 -d esp-matter/examples/light
+              # a/main/app_main.cpp → strip a/ → main/app_main.cpp → in light/ = main/app_main.cpp
+              if patch --dry-run -p1 -d esp-matter/examples/light < "$PATCH" 2>/dev/null; then
+                patch -p1 -d esp-matter/examples/light < "$PATCH"
+                echo "  OK (patch -p1 -d esp-matter/examples/light)"
                 APPLIED=$((APPLIED+1))
-              # Essai 2 : avec --directory
-              elif git apply --check \
-                     --directory=esp-matter/examples/light/main \
+              # Method 2: git apply -p1 --directory (fallback)
+              elif git apply --check -p1 \
+                     --directory=esp-matter/examples/light \
                      "$PATCH" 2>/dev/null; then
-                git apply --directory=esp-matter/examples/light/main "$PATCH"
-                echo "  OK (--directory)"
+                git apply -p1 \
+                  --directory=esp-matter/examples/light "$PATCH"
+                echo "  OK (git apply -p1 --directory)"
+                APPLIED=$((APPLIED+1))
+              # Method 3: direct git apply
+              elif git apply --check "$PATCH" 2>/dev/null; then
+                git apply "$PATCH"
+                echo "  OK (git apply direct)"
                 APPLIED=$((APPLIED+1))
               else
-                echo "  Skip"
+                echo "  Skip — showing error:"
+                patch --dry-run -p1 -d esp-matter/examples/light < "$PATCH" 2>&1 | head -5 || true
                 SKIPPED=$((SKIPPED+1))
               fi
             done
           else
-            echo "No patches found — nothing to apply"
+            echo "No patches found in $PATCH_DIR"
           fi
 
           echo "Result: applied=$APPLIED skipped=$SKIPPED"
@@ -1346,7 +1407,7 @@ jobs:
 
       - name: Créer branche autofix et pusher
         id: push_branch
-        if: steps.apply_local.outputs.applied != '0'
+        if: steps.apply_local.outputs.applied != '0' || steps.apply_local.outputs.tests_added == 'true'
         run: |
           BRANCH="autofix/run-${{ github.run_id }}"
           git checkout -b "$BRANCH"
@@ -1950,7 +2011,3 @@ jobs:
           [ "$OVERALL" = "failure" ] && \
             echo "::error::One or more critical stages failed" && exit 1
           echo "Full DevSecOps loop with AI agents + QEMU + AutoFix completed"
- 
-
-
-          
