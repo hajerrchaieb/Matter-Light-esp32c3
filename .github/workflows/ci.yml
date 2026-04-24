@@ -44,60 +44,72 @@ env:
 # ════════════════════════════════════════════════════════════════════
 jobs:
   lint-and-validate:
-    name: 🔵 Stage 1 — Plan & Code Quality
+    name: Stage 1 — Plan & Code Quality
     runs-on: ubuntu-latest
-    continue-on-error: true   # 🔥 NEVER block pipeline
-
     steps:
-      - name: 📥 Checkout
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 🛠️ Install linting tools
+      - name: Install linting tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y yamllint cppcheck flawfinder clang-format python3-pip
           pip3 install bandit
-      # ✅ FIX 1 — yamllint NON-BLOCKING
-      - name: 🗂️ Validate Workflow YAML
-        run: |
-          yamllint -d relaxed .github/workflows/ || true
-      - name: 📝 Lint Commit Messages
-        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/develop'
-        uses: wagoid/commitlint-github-action@v5
-        continue-on-error: true   # 🔥 don't block
 
-      - name: 🔍 Dependency Review (PR only)
+      - name: Validate Workflow YAML
+        run: |
+          cat > /tmp/.yamllint << 'YEOF'
+          extends: default
+          rules:
+            line-length:
+              max: 200
+              level: warning
+            truthy:
+              allowed-values: ['true', 'false', 'on', 'off']
+              check-keys: false
+            brackets:
+              min-spaces-inside: 0
+              max-spaces-inside: 1
+            comments-indentation: disable
+            document-start: disable
+          YEOF
+          yamllint -c /tmp/.yamllint .github/workflows/
+
+      - name: Lint Commit Messages
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/develop'
+        uses: wagoid/commitlint-github-action@v6
+
+      - name: Dependency Review (PR only)
         if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@v4
-        continue-on-error: true
 
-      - name: 🔗 Check pre-commit config
+      - name: Check pre-commit config
         run: |
           mkdir -p ${{ env.REPORTS_DIR }}
           if [ ! -f .pre-commit-config.yaml ]; then
-            echo "::warning::No .pre-commit-config.yaml found — add one for local enforcement"
+            echo "::warning::No .pre-commit-config.yaml found"
           else
-            echo "✅ pre-commit config found"
+            echo "pre-commit config found"
           fi
-      # ✅ FIX 2 — clang-format NO FAIL
-      - name: 🎨 Clang-Format Check
+
+      - name: Clang-Format Check
         run: |
           if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
             UNFORMATTED=$(find ${{ env.EXAMPLE_PATH }} \
               \( -name "*.c" -o -name "*.cpp" -o -name "*.h" \) \
-              | xargs clang-format --dry-run 2>&1 | wc -l)
+              | xargs clang-format --dry-run --Werror 2>&1 | grep "^" | wc -l)
             if [ "$UNFORMATTED" -gt "0" ]; then
-              echo "::warning::$UNFORMATTED file(s) have formatting issues — run clang-format"
+              echo "::warning::$UNFORMATTED file(s) have formatting issues"
             else
-              echo "✅ All files are properly formatted"
+              echo "All files properly formatted"
             fi
           else
-            echo "Source path not found: ${{ env.EXAMPLE_PATH }} — skipping clang-format"
+            echo "Source path not found — skipping clang-format"
           fi
-      # ✅ FIX 3 — Bandit NON-BLOCKING (already almost ok)
-      - name: 🔐 Python Security Scan (Bandit)
+
+      - name: Python Security Scan (Bandit)
         run: |
           if find . -name "*.py" -not -path "./.git/*" | grep -q .; then
             bandit -r . --exclude './.git,./build' -lll -f json \
@@ -107,8 +119,8 @@ jobs:
             echo "No Python files found — skipping Bandit" \
               | tee ${{ env.REPORTS_DIR }}/bandit-report.json
           fi
-      # ✅ FIX 4 — cppcheck NEVER FAIL
-      - name: 🔍 cppcheck Early Static Analysis
+
+      - name: cppcheck Early Static Analysis
         run: |
           if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
             cppcheck \
@@ -117,13 +129,14 @@ jobs:
               --error-exitcode=0 \
               --xml --xml-version=2 \
               ${{ env.EXAMPLE_PATH }} \
-              2> ${{ env.REPORTS_DIR }}/cppcheck-report.xml || true
+              2> ${{ env.REPORTS_DIR }}/cppcheck-report.xml
             flawfinder --html ${{ env.EXAMPLE_PATH }} \
               > ${{ env.REPORTS_DIR }}/flawfinder-report.html || true
           else
-            echo "Source path not found: ${{ env.EXAMPLE_PATH }}"
+            echo "Source path not found"
           fi
-      - name: 📤 Upload lint reports
+
+      - name: Upload lint reports
         uses: actions/upload-artifact@v4
         with:
           name: lint-reports
@@ -409,23 +422,145 @@ jobs:
         run: |
           mkdir -p ${{ env.REPORTS_DIR }}
           docker pull ${{ env.DOCKER_IMAGE }} 2>/dev/null || true
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            ${{ env.DOCKER_IMAGE }} \
-            /bin/bash -c "
-              . \$IDF_PATH/export.sh 2>/dev/null
-              [ -f \$ESP_MATTER_PATH/export.sh ] && \
-                . \$ESP_MATTER_PATH/export.sh 2>/dev/null || true
-              cd /opt/espressif/esp-matter/examples/light
-              if [ -d test ]; then
-                idf.py build --target linux \
-                  2>&1 | tee /workspace/${{ env.REPORTS_DIR }}/test-build-esp32c3.log || true
-              else
-                echo 'No test/ directory found'
-              fi
-            " 2>/dev/null || echo "::notice::Unit test docker run skipped"
-          echo '{"status":"no_tests_yet","note":"Implement Unity tests in examples/light/test/"}' \
-            > ${{ env.REPORTS_DIR }}/unit-test-results.json
+
+          # Check if generated tests exist in the repo (committed by Stage 4c/setup script)
+          TEST_DIR="esp-matter/examples/light/test"
+          TEST_CPP="$TEST_DIR/test_light_app_esp32c3.cpp"
+          HAS_TESTS=false
+          if [ -f "$TEST_CPP" ]; then
+            HAS_TESTS=true
+            echo "Test file found in repo: $TEST_CPP"
+            ls -la "$TEST_DIR/"
+          else
+            echo "No test file in repo yet — checking reports/ (from agent run)"
+            if [ -f "${{ env.REPORTS_DIR }}/generated_tests_esp32c3.cpp" ]; then
+              mkdir -p "$TEST_DIR"
+              cp "${{ env.REPORTS_DIR }}/generated_tests_esp32c3.cpp" "$TEST_CPP"
+              HAS_TESTS=true
+              echo "Using generated test from reports/"
+            fi
+          fi
+
+          if [ "$HAS_TESTS" = "true" ]; then
+            echo "=== Running Unity tests in Docker ==="
+            docker run --rm \
+              -v "${{ github.workspace }}:/workspace" \
+              ${{ env.DOCKER_IMAGE }} \
+              /bin/bash -c "
+                set -e
+                . \$IDF_PATH/export.sh 2>/dev/null
+                [ -f \$ESP_MATTER_PATH/export.sh ] && \
+                  . \$ESP_MATTER_PATH/export.sh 2>/dev/null || true
+
+                ESP_TEST='/opt/espressif/esp-matter/examples/light/test'
+                WORKSPACE_TEST='/workspace/esp-matter/examples/light/test'
+
+                echo '=== Copying test files into container ==='
+                mkdir -p \"\$ESP_TEST/main\"
+                cp \"\$WORKSPACE_TEST/test_light_app_esp32c3.cpp\" \
+                   \"\$ESP_TEST/main/\" 2>/dev/null || true
+
+                # Copy mock headers if present
+                for h in mock_idf.h mock_led_driver.h mock_gpio.h; do
+                  [ -f \"/workspace/fuzz/\$h\" ] && \
+                    cp \"/workspace/fuzz/\$h\" \"\$ESP_TEST/main/\" || true
+                  [ -f \"/workspace/\$WORKSPACE_TEST/\$h\" ] && \
+                    cp \"/workspace/\$WORKSPACE_TEST/\$h\" \"\$ESP_TEST/main/\" || true
+                done
+
+                # Write CMakeLists for project
+                printf 'cmake_minimum_required(VERSION 3.16)\ninclude(\$ENV{IDF_PATH}/tools/cmake/project.cmake)\nproject(light_test)\n' \
+                  > \"\$ESP_TEST/CMakeLists.txt\"
+
+                # Write CMakeLists for component
+                printf 'idf_component_register(\n    SRCS \"test_light_app_esp32c3.cpp\"\n    INCLUDE_DIRS \".\"\n    REQUIRES unity esp_system\n)\n' \
+                  > \"\$ESP_TEST/main/CMakeLists.txt\"
+
+                echo '=== Building test suite ==='
+                cd \"\$ESP_TEST\"
+                idf.py set-target esp32c3
+                idf.py build 2>&1 | tee /workspace/${{ env.REPORTS_DIR }}/test-build-esp32c3.log || true
+
+                # Check if build succeeded
+                if grep -q 'Project build complete' /workspace/${{ env.REPORTS_DIR }}/test-build-esp32c3.log; then
+                  echo 'TEST_BUILD=success' >> /workspace/${{ env.REPORTS_DIR }}/test-build-status.txt
+                  echo '=== Test build succeeded ==='
+                else
+                  echo 'TEST_BUILD=failed' >> /workspace/${{ env.REPORTS_DIR }}/test-build-status.txt
+                  echo '::warning::Test build failed — see test-build-esp32c3.log'
+                fi
+              " 2>&1 || echo "::notice::Test docker run had issues"
+
+            # Parse test results
+            python3 << 'PYEOF'
+          import json, re
+          from pathlib import Path
+
+          REPORTS = Path("${{ env.REPORTS_DIR }}")
+          log_path = REPORTS / "test-build-esp32c3.log"
+          status_path = REPORTS / "test-build-status.txt"
+          out_path  = REPORTS / "unit-test-results.json"
+
+          build_ok = False
+          if status_path.exists():
+            build_ok = "success" in status_path.read_text()
+
+          test_lines = []
+          passed = failed = 0
+
+          if log_path.exists():
+            log = log_path.read_text(errors="ignore")
+            for line in log.splitlines():
+              if "PASS" in line or "FAIL" in line or "TEST(" in line:
+                test_lines.append(line.strip())
+              m = re.search(r"(\d+) Tests (\d+) Failures", line)
+              if m:
+                passed = int(m.group(1)) - int(m.group(2))
+                failed = int(m.group(2))
+
+          if build_ok and passed + failed > 0:
+            result = {
+              "status": "pass" if failed == 0 else "fail",
+              "passed": passed,
+              "failed": failed,
+              "total":  passed + failed,
+              "test_lines": test_lines[:20],
+              "note": f"Unity tests compiled and ran: {passed} passed, {failed} failed",
+            }
+          elif build_ok:
+            result = {
+              "status":  "compiled",
+              "passed":  0,
+              "failed":  0,
+              "total":   0,
+              "note":    "Test binary compiled but no test output captured (check QEMU run)",
+            }
+          else:
+            # Count test functions in the source to show something useful
+            test_cpp = Path("esp-matter/examples/light/test/test_light_app_esp32c3.cpp")
+            n_tests = 0
+            if test_cpp.exists():
+              src = test_cpp.read_text()
+              n_tests = len(re.findall(r'^void test_', src, re.MULTILINE))
+
+            result = {
+              "status":  "build_failed" if Path("${{ env.REPORTS_DIR }}/test-build-esp32c3.log").exists()
+                         else "no_tests_yet",
+              "passed":  0,
+              "failed":  0,
+              "total":   n_tests,
+              "note":    f"Test file has {n_tests} test function(s). Build status: {'failed' if build_ok is False else 'unknown'}",
+            }
+
+          out_path.write_text(json.dumps(result, indent=2))
+          print(f"Test result: {result['status']} | {result.get('passed',0)} passed | {result.get('failed',0)} failed")
+          PYEOF
+
+          else
+            echo "No tests available — writing no_tests_yet status"
+            echo '{"status":"no_tests_yet","passed":0,"failed":0,"total":0,"note":"Add tests via: workflow_dispatch reason=sync-esp-matter-source"}' \
+              > ${{ env.REPORTS_DIR }}/unit-test-results.json
+          fi
 
       - name: Install Espressif QEMU for ESP32-C3
         run: |
@@ -2092,4 +2227,3 @@ jobs:
           [ "$OVERALL" = "failure" ] && \
             echo "::error::One or more critical stages failed" && exit 1
           echo "Full DevSecOps loop with AI agents + QEMU + AutoFix completed"
-
