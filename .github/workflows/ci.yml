@@ -892,7 +892,7 @@ test-and-quality:
 # ════════════════════════════════════════════════════════════════════
 # STAGE AI — AUTONOMOUS AI ANALYSIS (Agents 1-8)
 # ════════════════════════════════════════════════════════════════════
- ai-agents:
+  ai-agents:
     name: Stage AI — Autonomous Agent Analysis (esp32c3)
     runs-on: ubuntu-latest
     needs:
