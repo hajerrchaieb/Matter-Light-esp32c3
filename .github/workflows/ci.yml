@@ -392,7 +392,7 @@ jobs:
 # ════════════════════════════════════════════════════════════════════
 # STAGE 5 — TEST & QUALITY GATE
 # ════════════════════════════════════════════════════════════════════
-  test-and-quality:
+test-and-quality:
     name: Stage 5 — Test & Quality Gate (esp32c3)
     runs-on: ubuntu-latest
     needs: build
@@ -892,7 +892,7 @@ jobs:
 # ════════════════════════════════════════════════════════════════════
 # STAGE AI — AUTONOMOUS AI ANALYSIS (Agents 1-8)
 # ════════════════════════════════════════════════════════════════════
-  ai-agents:
+ ai-agents:
     name: Stage AI — Autonomous Agent Analysis (esp32c3)
     runs-on: ubuntu-latest
     needs:
@@ -928,7 +928,6 @@ jobs:
           else
             echo "History found: $(cat ${{ env.REPORTS_DIR }}/run-history.json               | python3 -c 'import json,sys; d=json.load(sys.stdin);               print(str(d.get("run_count",0)) + " run(s)")')"
           fi
-
       - name: Download lint reports (Stage 1)
         uses: actions/download-artifact@v4
         with:
@@ -994,13 +993,11 @@ jobs:
           done
           echo "=== Firmware ==="
           ls -la ${{ env.FIRMWARE_DIR }}/esp32c3/ 2>/dev/null || echo "No firmware"
-
       - name: Install AI agent dependencies
         run: |
           python3 -m pip install --upgrade pip
           pip install langchain langchain-core langchain-groq langgraph \
             chromadb python-dotenv pydantic
-
       - name: Configure agent environment
         run: |
           printf 'GROQ_API_KEY=%s\n' "${{ secrets.GROQ_API_KEY1 }}" > .env
@@ -1014,7 +1011,6 @@ jobs:
             echo "::error::GROQ_API_KEY is empty — add it in Settings > Secrets > Actions"
             exit 1
           fi
-
       - name: Expose ESP-Matter source for agents
         run: |
           mkdir -p esp-matter/examples/light/main
@@ -1027,7 +1023,6 @@ jobs:
                 /workspace/esp-matter/examples/light/main/ 2>/dev/null || true
             "
           ls esp-matter/examples/light/main/ 2>/dev/null || echo "No files"
-
       - name: Pre-flight check (agents + secrets + files)
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY1 }}
@@ -1066,7 +1061,6 @@ jobs:
             echo "  ::warning::Use the updated orchestrator.py from Claude artifacts"
           fi
           echo "=== Pre-flight passed ==="
-
       - name: Run AI Agents Orchestrator (Agents 1-8 + AutoFix)
         id: run_agents
         env:
@@ -1082,7 +1076,6 @@ jobs:
             --target esp32c3 \
             --version "v${{ github.run_number }}" \
             2>&1 | tee ${{ env.REPORTS_DIR }}/orchestrator-run.log
-
           # Parse outputs from pipeline-summary.json
           if [ -f ${{ env.REPORTS_DIR }}/pipeline-summary.json ]; then
             PASSED=$(python3 -c "
@@ -1113,13 +1106,11 @@ jobs:
             echo "::warning::pipeline-summary.json not found — defaulting"
             PASSED="true"; SEC="N/A"; QUA="N/A"; PATCHES="0"
           fi
-
           echo "ai_passed=$PASSED"      >> $GITHUB_OUTPUT
           echo "security_score=$SEC"    >> $GITHUB_OUTPUT
           echo "quality_score=$QUA"     >> $GITHUB_OUTPUT
           echo "patches_count=$PATCHES" >> $GITHUB_OUTPUT
           echo "AI: passed=$PASSED | sec=$SEC/10 | quality=$QUA/10 | patches=$PATCHES"
-
           # Debug: if scores are N/A show last 50 lines of orchestrator log
           if [ "$SEC" = "N/A" ] || [ "$QUA" = "N/A" ]; then
             echo "::warning::Scores are N/A — showing orchestrator log tail"
@@ -1128,7 +1119,6 @@ jobs:
             echo "=== pipeline-summary.json content ==="
             cat ${{ env.REPORTS_DIR }}/pipeline-summary.json 2>/dev/null               | python3 -m json.tool 2>/dev/null || true
           fi
-
       - name: Regression Detection
         if: always()
         run: |
@@ -1161,7 +1151,6 @@ jobs:
           except Exception as e:
             print(f"::warning::Regression detection error: {e}")
           PYEOF
-
       - name: Post AI Summary to GitHub
         if: always()
         run: |
@@ -1191,7 +1180,6 @@ jobs:
           print("\n".join(lines))
           PYEOF
           fi
-
       - name: Post AI Results as PR Comment
         if: github.event_name == 'pull_request' && always()
         uses: actions/github-script@v7
@@ -1218,7 +1206,6 @@ jobs:
               issue_number: context.issue.number,
               body
             });
-
       - name: Upload orchestrator log (always — pour debug)
         uses: actions/upload-artifact@v4
         if: always()
