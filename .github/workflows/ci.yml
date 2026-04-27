@@ -1257,7 +1257,6 @@ jobs:
             ${{ env.REPORTS_DIR }}/regression-report.json
             ${{ env.REPORTS_DIR }}/run-history.json
           retention-days: 90
-
 # ════════════════════════════════════════════════════════════════════
 # STAGE 4b — APPLY AUTOFIX PATCHES & REBUILD
 # ════════════════════════════════════════════════════════════════════
