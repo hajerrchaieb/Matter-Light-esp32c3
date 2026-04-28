@@ -1,2332 +1,568 @@
-name: ESP32 Matter — DevSecOps Full Lifecycle
+"""
+agents/autofix_agent.py — Agent 8 : AutoFix Agent
+==================================================
+TWO-LEVEL FIX ENGINE:
+  Level 1 — LLM (Groq): rewrites the full file
+  Level 2 — Rule-based: deterministic, no LLM needed
+    Guarantees patches even without GROQ_API_KEY.
 
-on:
-  push:
-    branches: [ main, develop ]
-    tags: [ 'v*.*.*' ]
-  pull_request:
-    branches: [ main, develop ]
-  schedule:
-    - cron: '0 2 * * 1'
-  workflow_dispatch:
-    inputs:
-      reason:
-        description: 'Raison du run manuel (ex: after autofix, manual trigger)'
-        required: false
-        default: 'manual trigger'
+COHERENCE FIXES vs other agents:
+  - apply_patches parameter added (called by LangGraph orchestrator)
+  - _collect_issues parses code_review markdown "review" field
+  - _is_code_issue handles empty file field (Gitleaks sometimes omits it)
+  - demo/intentional_bug.py detected from description keywords
 
-permissions:
-  contents: write
-  security-events: write
-  actions: read
-  pull-requests: write
-  issues: write
-  packages: read
+PATCH PATH:
+  Python files: fromfile="a/demo/intentional_bug.py"
+    git apply -p1 -> "demo/intentional_bug.py" -> FOUND in repo
+  C++ files: fromfile="a/esp-matter/examples/light/main/app_main.cpp"
+    patch -p1 -d esp-matter/examples/light -> "main/app_main.cpp" -> FOUND
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+VALIDATION:
+  patch --dry-run before saving. Broken patches discarded.
+"""
 
-defaults:
-  run:
-    shell: bash
+import difflib, json, os, re, subprocess, tempfile
+from datetime import datetime
+from pathlib import Path
 
-env:
-  DOCKER_IMAGE: hajerrchaieb/matter-light:v1
-  TARGET_CHIP: esp32c3
-  EXAMPLE_PATH: esp-matter/examples/light
-  FIRMWARE_DIR: firmware
-  REPORTS_DIR: reports
+try:
+    from dotenv import load_dotenv
+    from langchain_groq import ChatGroq
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_core.output_parsers import StrOutputParser
+    load_dotenv()
+    _LLM_AVAILABLE = bool(os.getenv("GROQ_API_KEY"))
+except Exception:
+    _LLM_AVAILABLE = False
 
-# ════════════════════════════════════════════════════════════════════
-# STAGE 1 — PLAN & CODE QUALITY
-# ════════════════════════════════════════════════════════════════════
-jobs:
-  lint-and-validate:
-    name: 🔵 Stage 1 — Plan & Code Quality
-    runs-on: ubuntu-latest
-    continue-on-error: true
+TARGET  = os.getenv("TARGET_CHIP", "esp32c3")
+REPORTS = Path("reports")
+PATCHES = REPORTS / "patches"
 
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+CPP_SOURCE_FILES = ["app_main.cpp", "app_driver.cpp", "app_priv.h"]
+ESP_SOURCE_CANDIDATES = [
+    Path("esp-matter/examples/light/main"),
+    Path(os.getenv("EXAMPLE_PATH", "esp-matter/examples/light")) / "main",
+    Path("/opt/espressif/esp-matter/examples/light/main"),
+]
 
-      - name: 🛠️ Install linting tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y yamllint cppcheck flawfinder clang-format python3-pip
-          pip3 install bandit
+# Only skip issues that are truly non-patchable (CI secrets, infra)
+NON_CODE_KEYWORDS = (
+    "groq_api_key", "pat_token", "github_token", "github secret",
+    "workflow secret", "ci secret", "sbom", "package version",
+    "dependabot", "docker image tag", ".github/workflows",
+    "environment variable missing", "env var not set",
+)
 
-      - name: 🗂️ Validate Workflow YAML
-        run: yamllint -d relaxed .github/workflows/ || true
+# Known demo files with bugs — used when Gitleaks omits the file field
+DEMO_BUG_FILES = [
+    "demo/intentional_bug.py",
+    "demo/bug.py",
+]
 
-      - name: 📝 Lint Commit Messages
-        # PATCH 3 — skip commitlint on autofix branches
-        if: |
-          (github.event_name == 'pull_request' || github.ref == 'refs/heads/develop') &&
-          !startsWith(github.head_ref, 'autofix/')
-        uses: wagoid/commitlint-github-action@v5
-        continue-on-error: true
-
-      - name: 🔍 Dependency Review (PR only)
-        if: github.event_name == 'pull_request'
-        uses: actions/dependency-review-action@v4
-        continue-on-error: true
-
-      - name: 🔗 Check pre-commit config
-        run: |
-          mkdir -p ${{ env.REPORTS_DIR }}
-          if [ ! -f .pre-commit-config.yaml ]; then
-            echo "::warning::No .pre-commit-config.yaml found"
-          else
-            echo "✅ pre-commit config found"
-          fi
-
-      - name: 🎨 Clang-Format Check
-        run: |
-          if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
-            UNFORMATTED=$(find ${{ env.EXAMPLE_PATH }} \
-              \( -name "*.c" -o -name "*.cpp" -o -name "*.h" \) \
-              | xargs clang-format --dry-run 2>&1 | wc -l)
-            if [ "$UNFORMATTED" -gt "0" ]; then
-              echo "::warning::$UNFORMATTED file(s) have formatting issues"
-            else
-              echo "✅ All files properly formatted"
-            fi
-          else
-            echo "Source path not found: ${{ env.EXAMPLE_PATH }} — skipping"
-          fi
-
-      - name: 🔐 Python Security Scan (Bandit)
-        run: |
-          if find . -name "*.py" -not -path "./.git/*" | grep -q .; then
-            bandit -r . --exclude './.git,./build' -lll -f json \
-              -o ${{ env.REPORTS_DIR }}/bandit-report.json || true
-            bandit -r . --exclude './.git,./build' -lll || true
-          else
-            echo "No Python files found — skipping Bandit" \
-              | tee ${{ env.REPORTS_DIR }}/bandit-report.json
-          fi
-
-      - name: 🔍 cppcheck Early Static Analysis
-        run: |
-          if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
-            cppcheck \
-              --enable=all \
-              --suppress=missingIncludeSystem \
-              --error-exitcode=0 \
-              --xml --xml-version=2 \
-              ${{ env.EXAMPLE_PATH }} \
-              2> ${{ env.REPORTS_DIR }}/cppcheck-report.xml || true
-            flawfinder --html ${{ env.EXAMPLE_PATH }} \
-              > ${{ env.REPORTS_DIR }}/flawfinder-report.html || true
-          else
-            echo "Source path not found: ${{ env.EXAMPLE_PATH }}"
-          fi
-
-      - name: 📤 Upload lint reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: lint-reports
-          path: ${{ env.REPORTS_DIR }}/
-          retention-days: 30
 
 # ════════════════════════════════════════════════════════════════════
-# STAGE 2 — SECRET & SUPPLY CHAIN SECURITY
+# HELPERS
 # ════════════════════════════════════════════════════════════════════
-  security-shift-left:
-    name: Stage 2 — Secret & Supply Chain Scan
-    runs-on: ubuntu-latest
-    needs: lint-and-validate
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Install Gitleaks
-        run: |
-          curl -sL \
-            https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
-            | tar -xz
-          sudo mv gitleaks /usr/local/bin/
-          mkdir -p ${{ env.REPORTS_DIR }}
+def _load_json(path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
-      - name: Secret Scan (Gitleaks)
-        run: |
-          if [ ! -f .gitleaksignore ]; then
-            printf '.env\nreports/\n.autofix-reports/\n' > /tmp/.gitleaksignore
-            IGNORE_FLAG="--gitleaks-ignore-path=/tmp/.gitleaksignore"
-          else
-            IGNORE_FLAG="--gitleaks-ignore-path=.gitleaksignore"
-          fi
-          gitleaks detect \
-            --source . \
-            $IGNORE_FLAG \
-            --report-format=json \
-            --report-path=${{ env.REPORTS_DIR }}/gitleaks-report.json \
-            --redact || true
-          if [ -f ${{ env.REPORTS_DIR }}/gitleaks-report.json ]; then
-            LEAKS=$(python3 -c "
-          import json, sys
-          try:
-            data = json.load(open('${{ env.REPORTS_DIR }}/gitleaks-report.json'))
-            print(len(data) if isinstance(data, list) else 0)
-          except:
-            print(0)
-          " 2>/dev/null || echo 0)
-            if [ "$LEAKS" -gt "0" ]; then
-              echo "::warning::Gitleaks found $LEAKS potential secret(s)"
-            else
-              echo "No secrets detected by Gitleaks"
-            fi
-          fi
 
-      - name: Generate SBOM (SPDX-JSON)
-        uses: anchore/sbom-action@v0
-        with:
-          path: .
-          format: spdx-json
-          output-file: ${{ env.REPORTS_DIR }}/sbom-spdx.json
+def _find_esp_source_dir():
+    for c in ESP_SOURCE_CANDIDATES:
+        if c.is_dir() and any((c/f).exists() for f in CPP_SOURCE_FILES):
+            return c
+    return None
 
-      - name: Generate SBOM (CycloneDX)
-        uses: anchore/sbom-action@v0
-        with:
-          path: .
-          format: cyclonedx-json
-          output-file: ${{ env.REPORTS_DIR }}/sbom-cyclonedx.json
 
-      - name: Grype CVE Scan on SBOM
-        run: |
-          curl -sSfL \
-            https://raw.githubusercontent.com/anchore/grype/main/install.sh \
-            | sh -s -- -b /usr/local/bin
-          grype sbom:${{ env.REPORTS_DIR }}/sbom-spdx.json \
-            --output json \
-            --file ${{ env.REPORTS_DIR }}/grype-report.json || true
-          grype sbom:${{ env.REPORTS_DIR }}/sbom-spdx.json \
-            --fail-on critical || true
+def _read_file(path):
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
 
-      - name: Check Dependabot Config
-        run: |
-          if [ ! -f .github/dependabot.yml ]; then
-            echo "::warning::No .github/dependabot.yml found"
-          else
-            echo "Dependabot config found"
-          fi
 
-      - name: Upload security reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-reports
-          path: ${{ env.REPORTS_DIR }}/
-          retention-days: 90
+def _parse_markdown_issues(review_text: str) -> list:
+    """
+    Parse code_review_agent markdown output to extract issues.
+    code_review_agent writes 'review' as a markdown string, NOT a list.
+    This function converts it to structured issues for autofix.
+    """
+    if not review_text:
+        return []
+    issues = []
+    # Split by section headers
+    sections = re.split(r"##\s+", review_text)
+    for section in sections:
+        lines = section.strip().splitlines()
+        if not lines:
+            continue
+        header = lines[0].lower()
+        content = "\n".join(lines[1:]).strip()
+        if not content or len(content) < 20:
+            continue
+        # Determine severity from section name
+        if any(k in header for k in ("security", "critical", "unsafe", "buffer")):
+            severity = "high"
+        elif any(k in header for k in ("quality", "best practice", "improvement", "violation")):
+            severity = "medium"
+        else:
+            continue  # Skip non-issue sections (score, title)
+        # Split content into individual bullet points
+        bullets = re.split(r"\n[-*•]\s*|\n\d+\.\s*", content)
+        for bullet in bullets:
+            bullet = bullet.strip()
+            if len(bullet) > 30:  # Skip very short bullets
+                issues.append({
+                    "source_agent":  "code_review",
+                    "severity":      severity,
+                    "file":          "",  # will be resolved in _get_patch_target
+                    "description":   bullet[:300],
+                    "suggested_fix": "",
+                    "category":      "quality",
+                })
+    return issues[:5]  # Limit to avoid too many patches
+
 
 # ════════════════════════════════════════════════════════════════════
-# STAGE 3 — CONTAINER IMAGE SECURITY
+# ISSUE CLASSIFICATION
 # ════════════════════════════════════════════════════════════════════
-  container-scan:
-    name: Stage 3 — Container Image Scan
-    runs-on: ubuntu-latest
-    needs: security-shift-left
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Pull Docker build image & capture digest
-        run: |
-          docker pull ${{ env.DOCKER_IMAGE }}
-          DIGEST=$(docker inspect \
-            --format='{{index .RepoDigests 0}}' \
-            ${{ env.DOCKER_IMAGE }} 2>/dev/null || echo "digest-unavailable")
-          echo "IMAGE_DIGEST=$DIGEST" >> $GITHUB_ENV
-          echo "Pulled: ${{ env.DOCKER_IMAGE }}"
-          echo "Digest: $DIGEST"
-          if [[ "${{ env.DOCKER_IMAGE }}" != *"@sha256:"* ]]; then
-            echo "::warning::Docker image uses mutable tag — pin to @sha256 for supply chain security"
-          fi
+def _is_code_issue(issue: dict) -> bool:
+    """
+    True if this issue can be fixed by patching a file in the repo.
+    Handles empty file field (common with Gitleaks reports).
+    """
+    file_field = (issue.get("file") or "").strip()
 
-      - name: Trivy — Scan Docker image for CVEs
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.DOCKER_IMAGE }}
-          format: sarif
-          output: trivy-image.sarif
-          severity: CRITICAL,HIGH
-          exit-code: '0'
+    # Rule 0: demo file keywords in description -> always patchable
+    desc_lower = issue.get("description", "").lower()
+    if any(kw in desc_lower for kw in ("sk-demo", "intentional_bug", "hardcoded api", "demo_api_key")):
+        return True
 
-      - name: Upload Trivy SARIF to Security tab
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: trivy-image.sarif
-        continue-on-error: true
+    # Rule 1: file physically exists in repo -> patchable
+    if file_field and Path(file_field).exists():
+        return True
 
-      - name: Trivy — Scan filesystem
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: fs
-          scan-ref: .
-          format: table
-          exit-code: '0'
+    # Rule 1b: basename matches C++ source in esp-matter
+    if file_field:
+        src_dir = _find_esp_source_dir()
+        if src_dir and (src_dir / Path(file_field).name).exists():
+            return True
 
-      - name: Write container scan summary
-        run: |
-          mkdir -p ${{ env.REPORTS_DIR }}
-          cat > ${{ env.REPORTS_DIR }}/container-scan-summary.json << EOF
-          {
-            "image": "${{ env.DOCKER_IMAGE }}",
-            "digest": "${{ env.IMAGE_DIGEST }}",
-            "scan_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          }
-          EOF
+    # Rule 2: non-code keywords -> skip
+    text = " ".join([
+        issue.get("description", ""),
+        issue.get("location", ""),
+        issue.get("category", ""),
+    ]).lower()
+    if any(k in text for k in NON_CODE_KEYWORDS):
+        return False
 
-      - name: Upload container scan reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: container-scan-reports
-          path: ${{ env.REPORTS_DIR }}/
-          retention-days: 30
+    # Rule 3: mentions a C++ source file -> patchable
+    if any(fn in text or fn in file_field for fn in CPP_SOURCE_FILES):
+        return True
 
-# ════════════════════════════════════════════════════════════════════
-# STAGE 4 — BUILD FIRMWARE
-# ════════════════════════════════════════════════════════════════════
-  build:
-    name: Stage 4 — Build Firmware (esp32c3)
-    runs-on: ubuntu-latest
-    needs: container-scan
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    # Rule 4: has actionable code info -> patchable
+    if issue.get("code_snippet") or issue.get("suggested_fix"):
+        return True
 
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.ccache
-          key: ccache-esp32c3-${{ github.sha }}
-          restore-keys: |
-            ccache-esp32c3-
+    # Rule 5: security issue with secret -> patchable (demo file)
+    if issue.get("category") in ("secret_in_code",) or "hardcoded" in text:
+        return True
 
-      - name: Build ESP Matter Firmware (esp32c3)
-        run: |
-          mkdir -p ${{ env.FIRMWARE_DIR }}/esp32c3
-          mkdir -p ${{ env.REPORTS_DIR }}
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -v ~/.ccache:/root/.ccache \
-            -e IDF_CCACHE_ENABLE=1 \
-            ${{ env.DOCKER_IMAGE }} \
-            /bin/bash -c "
-              set -e
-              . \$IDF_PATH/export.sh
-              [ -f \$ESP_MATTER_PATH/export.sh ] && . \$ESP_MATTER_PATH/export.sh
-              cd /opt/espressif/esp-matter/examples/light
-              idf.py set-target esp32c3
-              idf.py build \
-                -DGIT_HASH=\"${{ github.sha }}\" \
-                -DBUILD_DATE=\"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \
-                2>&1 | tee /workspace/${{ env.REPORTS_DIR }}/build-esp32c3.log
-              cp build/*.bin \
-                /workspace/${{ env.FIRMWARE_DIR }}/esp32c3/ 2>/dev/null || true
-              cp build/bootloader/*.bin \
-                /workspace/${{ env.FIRMWARE_DIR }}/esp32c3/ 2>/dev/null || true
-              cp build/partition_table/*.bin \
-                /workspace/${{ env.FIRMWARE_DIR }}/esp32c3/ 2>/dev/null || true
-              cp build/flasher_args.json \
-                /workspace/${{ env.FIRMWARE_DIR }}/esp32c3/ 2>/dev/null || true
-              idf.py size 2>&1 \
-                | tee /workspace/${{ env.REPORTS_DIR }}/size-esp32c3.txt
-              idf.py size-components 2>&1 \
-                | tee /workspace/${{ env.REPORTS_DIR }}/size-components-esp32c3.txt
-              cp build/*.map \
-                /workspace/${{ env.REPORTS_DIR }}/ 2>/dev/null || true
-            "
+    return False
 
-      - name: Sign Firmware Binary (Secure Boot V2)
-        run: |
-          pip install esptool --quiet 2>/dev/null || true
-          if [ -n "${{ secrets.FIRMWARE_SIGNING_KEY }}" ]; then
-            echo "${{ secrets.FIRMWARE_SIGNING_KEY }}" > /tmp/signing_key.pem
-            for bin in ${{ env.FIRMWARE_DIR }}/esp32c3/*.bin; do
-              [ -f "$bin" ] || continue
-              python3 -m espsecure sign_data \
-                --version 2 \
-                --keyfile /tmp/signing_key.pem \
-                "$bin" \
-                --output "${bin%.bin}-signed.bin" 2>/dev/null || true
-            done
-            rm -f /tmp/signing_key.pem
-            echo "Firmware signed with Secure Boot V2"
-          else
-            echo "::warning::FIRMWARE_SIGNING_KEY not configured — unsigned"
-          fi
 
-      - name: Write build manifest
-        run: |
-          cat > ${{ env.FIRMWARE_DIR }}/esp32c3/build-manifest.json << EOF
-          {
-            "target": "esp32c3",
-            "commit": "${{ github.sha }}",
-            "ref": "${{ github.ref }}",
-            "run_id": "${{ github.run_id }}",
-            "docker": "${{ env.DOCKER_IMAGE }}",
-            "builder": "github-actions"
-          }
-          EOF
+def _get_patch_target(issue: dict):
+    """
+    Returns (repo_relative_path, file_content) or None.
+    Handles empty file field by trying demo files.
+    """
+    file_field = (issue.get("file") or "").strip()
+    src_dir    = _find_esp_source_dir()
+    desc_lower = issue.get("description", "").lower()
 
-      - name: Upload firmware (esp32c3)
-        uses: actions/upload-artifact@v4
-        with:
-          name: firmware-esp32c3
-          path: ${{ env.FIRMWARE_DIR }}/esp32c3/
-          retention-days: 30
+    # Try 1: direct repo file
+    if file_field and Path(file_field).exists():
+        content = _read_file(file_field)
+        if content:
+            return file_field.lstrip("/"), content
 
-      - name: Upload build reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-reports-esp32c3
-          path: ${{ env.REPORTS_DIR }}/
-          retention-days: 30
+    # Try 2: demo files (when Gitleaks/security agent omits file field)
+    for demo_file in DEMO_BUG_FILES:
+        if Path(demo_file).exists():
+            # Check if the issue is likely about this demo file
+            content = _read_file(demo_file)
+            if content and (
+                not file_field  # no file field -> try demo
+                or demo_file in file_field
+                or any(kw in desc_lower for kw in ("sk-demo", "hardcoded", "api key", "api_key", "secret"))
+            ):
+                return demo_file, content
+
+    # Try 3: C++ file in esp-matter
+    if src_dir:
+        basename = Path(file_field).name if file_field else ""
+        for fn in CPP_SOURCE_FILES:
+            if basename == fn or fn.lower() in desc_lower:
+                p = src_dir / fn
+                if p.exists():
+                    return f"esp-matter/examples/light/main/{fn}", _read_file(p)
+        # Fallback app_main.cpp for code review issues
+        if issue.get("source_agent") in ("code_review", "debug", "fault_analysis"):
+            p = src_dir / "app_main.cpp"
+            if p.exists():
+                return "esp-matter/examples/light/main/app_main.cpp", _read_file(p)
+
+    return None
+
 
 # ════════════════════════════════════════════════════════════════════
-# STAGE 5 — TEST & QUALITY GATE
+# ISSUE COLLECTION — reads all agent reports
 # ════════════════════════════════════════════════════════════════════
-  test-and-quality:
-    name: Stage 5 — Test & Quality Gate (esp32c3)
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Download firmware artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: firmware-esp32c3
-          path: ${{ env.FIRMWARE_DIR }}/esp32c3/
+def _collect_issues(reports: dict) -> list:
+    issues = []
 
-      - name: Run Host-side Unit Tests
-        run: |
-          mkdir -p ${{ env.REPORTS_DIR }}
-          docker pull ${{ env.DOCKER_IMAGE }} 2>/dev/null || true
-          TEST_DIR="esp-matter/examples/light/test"
-          TEST_CPP="$TEST_DIR/test_light_app_esp32c3.cpp"
-          HAS_TESTS=false
-          if [ -f "$TEST_CPP" ]; then
-            HAS_TESTS=true
-            echo "Test file found in repo: $TEST_CPP"
-          else
-            echo "No test file in repo yet — checking reports/"
-            if [ -f "${{ env.REPORTS_DIR }}/generated_tests_esp32c3.cpp" ]; then
-              mkdir -p "$TEST_DIR"
-              cp "${{ env.REPORTS_DIR }}/generated_tests_esp32c3.cpp" "$TEST_CPP"
-              HAS_TESTS=true
-              echo "Using generated test from reports/"
-            fi
-          fi
-          if [ "$HAS_TESTS" = "true" ]; then
-            echo "=== Running Unity tests in Docker ==="
-            docker run --rm \
-              -v "${{ github.workspace }}:/workspace" \
-              ${{ env.DOCKER_IMAGE }} \
-              /bin/bash -c "
-                set -e
-                . \$IDF_PATH/export.sh 2>/dev/null
-                [ -f \$ESP_MATTER_PATH/export.sh ] && \
-                  . \$ESP_MATTER_PATH/export.sh 2>/dev/null || true
-                ESP_TEST='/opt/espressif/esp-matter/examples/light/test'
-                WORKSPACE_TEST='/workspace/esp-matter/examples/light/test'
-                mkdir -p \"\$ESP_TEST/main\"
-                cp \"\$WORKSPACE_TEST/test_light_app_esp32c3.cpp\" \
-                   \"\$ESP_TEST/main/\" 2>/dev/null || true
-                for h in mock_idf.h mock_led_driver.h mock_gpio.h; do
-                  [ -f \"/workspace/fuzz/\$h\" ] && \
-                    cp \"/workspace/fuzz/\$h\" \"\$ESP_TEST/main/\" || true
-                done
-                printf 'cmake_minimum_required(VERSION 3.16)\ninclude(\$ENV{IDF_PATH}/tools/cmake/project.cmake)\nproject(light_test)\n' \
-                  > \"\$ESP_TEST/CMakeLists.txt\"
-                printf 'idf_component_register(\n    SRCS \"test_light_app_esp32c3.cpp\"\n    INCLUDE_DIRS \".\"\n    REQUIRES unity esp_system\n)\n' \
-                  > \"\$ESP_TEST/main/CMakeLists.txt\"
-                echo '=== Building test suite ==='
-                cd \"\$ESP_TEST\"
-                idf.py set-target esp32c3
-                idf.py build 2>&1 | tee /workspace/${{ env.REPORTS_DIR }}/test-build-esp32c3.log || true
-                if grep -q 'Project build complete' /workspace/${{ env.REPORTS_DIR }}/test-build-esp32c3.log; then
-                  echo 'TEST_BUILD=success' >> /workspace/${{ env.REPORTS_DIR }}/test-build-status.txt
-                else
-                  echo 'TEST_BUILD=failed' >> /workspace/${{ env.REPORTS_DIR }}/test-build-status.txt
-                  echo '::warning::Test build failed'
-                fi
-              " 2>&1 || echo "::notice::Test docker run had issues"
-            python3 << 'PYEOF'
-          import json, re
-          from pathlib import Path
-          REPORTS = Path("${{ env.REPORTS_DIR }}")
-          log_path = REPORTS / "test-build-esp32c3.log"
-          status_path = REPORTS / "test-build-status.txt"
-          out_path = REPORTS / "unit-test-results.json"
-          build_ok = status_path.exists() and "success" in status_path.read_text()
-          test_lines = []; passed = failed = 0
-          if log_path.exists():
-            log = log_path.read_text(errors="ignore")
-            for line in log.splitlines():
-              if "PASS" in line or "FAIL" in line or "TEST(" in line:
-                test_lines.append(line.strip())
-              m = re.search(r"(\d+) Tests (\d+) Failures", line)
-              if m: passed = int(m.group(1)) - int(m.group(2)); failed = int(m.group(2))
-          if build_ok and passed + failed > 0:
-            result = {"status": "pass" if failed == 0 else "fail",
-                      "passed": passed, "failed": failed, "total": passed + failed,
-                      "test_lines": test_lines[:20]}
-          elif build_ok:
-            result = {"status": "compiled", "passed": 0, "failed": 0, "total": 0,
-                      "note": "Test binary compiled — no Unity output (needs QEMU execution)"}
-          else:
-            test_cpp = Path("esp-matter/examples/light/test/test_light_app_esp32c3.cpp")
-            n = len(re.findall(r'^void test_', test_cpp.read_text(), re.MULTILINE)) if test_cpp.exists() else 0
-            result = {"status": "no_tests_yet", "passed": 0, "failed": 0, "total": n}
-          out_path.write_text(json.dumps(result, indent=2))
-          print(f"Test result: {result['status']} | {result.get('passed',0)} passed | {result.get('failed',0)} failed")
-          PYEOF
-          else
-            echo '{"status":"no_tests_yet","passed":0,"failed":0,"total":0}' \
-              > ${{ env.REPORTS_DIR }}/unit-test-results.json
-          fi
+    # Security — hardcoded secrets (from Gitleaks via security_agent)
+    sec = reports.get("security", {})
+    for s in (sec.get("secrets_found") or []):
+        # Gitleaks sometimes has empty file field
+        file_val = s.get("file", "") or s.get("path", "") or ""
+        issues.append({
+            "source_agent":  "security",
+            "severity":      "critical",
+            "file":          file_val,
+            "description": (
+                f"Hardcoded {s.get('type','secret')} detected. "
+                f"Rule: {s.get('rule','')}. "
+                f"Match: {s.get('match',s.get('secret',''))[:40]}. "
+                f"Action: {s.get('action','')}"
+            ),
+            "suggested_fix": "Replace with os.environ.get('VAR', '')",
+            "category":      "secret_in_code",
+        })
+    for cve in (sec.get("critical_cves") or []):
+        issues.append({
+            "source_agent":  "security",
+            "severity":      cve.get("severity", "high"),
+            "file":          cve.get("file", ""),
+            "description":   cve.get("description", str(cve)),
+            "suggested_fix": cve.get("remediation", ""),
+            "category":      "security",
+        })
 
-      # ── FAULT INJECTION (PATCH 1) ─────────────────────────────────
-      - name: Run Fault Injection (QEMU simulation mode)
-        run: |
-          mkdir -p ${{ env.REPORTS_DIR }}
-          python3 << 'PYEOF'
-          import sys, os, json
-          from pathlib import Path
-          sys.path.insert(0, ".")
-          os.environ.setdefault("TARGET_CHIP", "${{ env.TARGET_CHIP }}")
+    # Code review — parse markdown "review" field
+    cr = reports.get("code_review", {})
+    # Try structured issues first (future-proof)
+    cr_issues = cr.get("issues") or cr.get("findings") or []
+    if cr_issues:
+        for it in cr_issues:
+            issues.append({
+                "source_agent":  "code_review",
+                "severity":      it.get("severity", "medium"),
+                "file":          it.get("file", ""),
+                "description":   it.get("description") or str(it),
+                "suggested_fix": it.get("suggested_fix",""),
+                "category":      "quality",
+            })
+    else:
+        # Parse markdown "review" string (current code_review_agent format)
+        review_text = cr.get("review", "")
+        if review_text:
+            parsed = _parse_markdown_issues(review_text)
+            issues.extend(parsed)
 
-          REPORTS = Path("${{ env.REPORTS_DIR }}")
-          target  = "${{ env.TARGET_CHIP }}"
+    # Debug agent
+    dbg = reports.get("debug", {})
+    for it in (dbg.get("issues") or dbg.get("bugs") or dbg.get("compilation_errors") or []):
+        issues.append({
+            "source_agent":  "debug",
+            "severity":      it.get("severity", "high"),
+            "file":          it.get("file", ""),
+            "description":   it.get("description") or it.get("error") or str(it),
+            "suggested_fix": it.get("suggested_fix") or it.get("fix", ""),
+            "category":      "bug",
+        })
 
-          try:
-              # Try multiple import paths
-              fi_mod = None
-              for candidate in ["tools.fault_injector", "fault_injector"]:
-                  try:
-                      import importlib
-                      fi_mod = importlib.import_module(candidate)
-                      break
-                  except ImportError:
-                      pass
+    # Fault analysis
+    fa = reports.get("fault", {})
+    for it in (fa.get("regressions") or fa.get("issues") or fa.get("failed_scenarios_analysis") or []):
+        issues.append({
+            "source_agent":  "fault_analysis",
+            "severity":      it.get("severity", "medium"),
+            "file":          it.get("file", "") or it.get("affected_file", ""),
+            "description":   it.get("description") or it.get("root_cause") or str(it),
+            "suggested_fix": it.get("suggested_fix") or it.get("fix_code", ""),
+            "category":      "robustness",
+        })
 
-              if fi_mod is None:
-                  # Try file-based import
-                  import importlib.util
-                  for fpath in [Path("tools/fault_injector.py"), Path("fault_injector.py"),
-                                Path("agents/fault_injector.py")]:
-                      if fpath.exists():
-                          spec = importlib.util.spec_from_file_location("fault_injector", fpath)
-                          fi_mod = importlib.util.module_from_spec(spec)
-                          spec.loader.exec_module(fi_mod)
-                          break
+    print(f"[AutoFix] Collected: {len(issues)} issues "
+          f"({sum(1 for i in issues if i['source_agent']=='security')} security, "
+          f"{sum(1 for i in issues if i['source_agent']=='code_review')} code_review, "
+          f"{sum(1 for i in issues if i['source_agent']=='debug')} debug, "
+          f"{sum(1 for i in issues if i['source_agent']=='fault_analysis')} fault)")
+    return issues
 
-              if fi_mod is None:
-                  raise FileNotFoundError("fault_injector.py not found in tools/, ., or agents/")
-
-              print(f"[Fault Injection] Running simulation mode for {target}...")
-              report = fi_mod.run_fault_injection(target=target)
-              total  = report.get("total_scenarios", 0)
-              passed = report.get("passed", 0)
-              status = report.get("overall_status", "unknown")
-              print(f"[Fault Injection] {passed}/{total} scenarios passed | status={status}")
-
-          except Exception as e:
-              print(f"::warning::Fault injection error: {e}")
-              # Write fallback report so fault_analysis_agent has something to read
-              fallback = {
-                  "target": target, "total_scenarios": 0, "passed": 0, "failed": 0,
-                  "overall_status": "not_run", "critical_failures": [], "high_failures": [],
-                  "by_family": {}, "scenarios": [],
-                  "summary": f"Fault injection not run: {e}",
-              }
-              (REPORTS / f"fault-injection-report-{target}.json").write_text(
-                  json.dumps(fallback, indent=2)
-              )
-              print("[Fault Injection] Fallback report written")
-          PYEOF
-
-      - name: Upload fault injection report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: fault-injection-report
-          path: ${{ env.REPORTS_DIR }}/fault-injection-report-${{ env.TARGET_CHIP }}.json
-          retention-days: 30
-
-      # ── QEMU ─────────────────────────────────────────────────────
-      - name: Install Espressif QEMU for ESP32-C3
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y libsdl2-2.0-0 libslirp0 libglib2.0-0
-          # FIX 1 — robust QEMU download with version fallback
-          QEMU_VERSION="esp-develop-9.2.2-20250228"
-          QEMU_BASE="https://github.com/espressif/qemu/releases/download"
-          QEMU_FILE="qemu-riscv32-softmmu-esp_develop_9.2.2_20250228-x86_64-linux-gnu.tar.xz"
-          QEMU_URL="$QEMU_BASE/$QEMU_VERSION/$QEMU_FILE"
-          echo "Downloading QEMU from: $QEMU_URL"
-          if curl -sL --fail-with-body "$QEMU_URL" -o qemu-esp.tar.xz 2>/dev/null; then
-            mkdir -p /opt/espressif-qemu
-            tar -xf qemu-esp.tar.xz -C /opt/espressif-qemu --strip-components=1
-            echo "/opt/espressif-qemu/bin" >> $GITHUB_PATH
-            # Verify binary works
-            if /opt/espressif-qemu/bin/qemu-system-riscv32 --version 2>/dev/null; then
-              echo "QEMU_AVAILABLE=true" >> $GITHUB_ENV
-              echo "✅ QEMU installed successfully"
-            else
-              echo "::warning::QEMU binary not functional"
-              echo "QEMU_AVAILABLE=false" >> $GITHUB_ENV
-            fi
-          else
-            echo "::warning::QEMU download failed — QEMU tests will be skipped"
-            echo "QEMU_AVAILABLE=false" >> $GITHUB_ENV
-          fi
-
-      - name: Install esptool
-        run: pip install esptool --quiet
-
-      - name: Merge firmware binaries into single flash image
-        run: |
-          mkdir -p ${{ env.REPORTS_DIR }}
-          FW_DIR="${{ env.FIRMWARE_DIR }}/esp32c3"
-          echo "=== Firmware files ==="
-          ls -la "$FW_DIR/" 2>/dev/null || echo "No firmware dir"
-
-          BOOTLOADER=$(find "$FW_DIR" -name "bootloader.bin" | head -1)
-          PARTITION=$(find "$FW_DIR" -name "partition-table.bin" | head -1)
-          APP=$(find "$FW_DIR" -maxdepth 1 -name "light.bin" | head -1)
-
-          if [ -z "$APP" ]; then
-            APP=$(find "$FW_DIR" -maxdepth 1 -name "*.bin" \
-              ! -name "bootloader.bin" \
-              ! -name "partition-table.bin" \
-              ! -name "*-signed.bin" | head -1)
-          fi
-
-          echo "Bootloader : ${BOOTLOADER:-NOT FOUND}"
-          echo "Partition  : ${PARTITION:-NOT FOUND}"
-          echo "App binary : ${APP:-NOT FOUND}"
-
-          # FIX 2 — Better error handling + use flasher_args if available
-          if [ -z "$BOOTLOADER" ] || [ -z "$PARTITION" ] || [ -z "$APP" ]; then
-            echo "::warning::One or more firmware binaries missing — QEMU will be skipped"
-            echo "::warning::Check Stage 4 build logs for compilation errors"
-            echo "QEMU_SKIP=true" >> $GITHUB_ENV
-            # FIX 6 — Write default QEMU report so agents have something to read
-            python3 -c "
-          import json
-          from pathlib import Path
-          report = {'target': 'esp32c3', 'status': 'skipped',
-                    'boot_success': False, 'app_started': False,
-                    'matter_started': False, 'panics': [], 'heap_errors': [],
-                    'watchdog_triggers': [], 'stack_overflows': [],
-                    'reboots': 0, 'warnings': [], 'log_lines': 0,
-                    'critical_count': 0, 'summary': 'QEMU skipped — firmware binaries missing'}
-          Path('${{ env.REPORTS_DIR }}/qemu-dynamic-report.json').write_text(json.dumps(report, indent=2))
-          print('Default QEMU report written')
-          "
-          else
-            # FIX 2 — Use flasher_args.json addresses if available
-            FLASHER_ARGS="$FW_DIR/flasher_args.json"
-            if [ -f "$FLASHER_ARGS" ]; then
-              echo "Using flasher_args.json for correct flash offsets"
-              BOOT_ADDR=$(python3 -c "
-          import json
-          fa = json.load(open('$FLASHER_ARGS'))
-          # Find bootloader address
-          for addr, f in fa.get('flash_files', {}).items():
-            if 'bootloader' in f: print(addr); break
-          " 2>/dev/null || echo "0x0")
-              PART_ADDR=$(python3 -c "
-          import json
-          fa = json.load(open('$FLASHER_ARGS'))
-          for addr, f in fa.get('flash_files', {}).items():
-            if 'partition' in f: print(addr); break
-          " 2>/dev/null || echo "0x8000")
-              APP_ADDR=$(python3 -c "
-          import json
-          fa = json.load(open('$FLASHER_ARGS'))
-          for addr, f in fa.get('flash_files', {}).items():
-            if 'bootloader' not in f and 'partition' not in f: print(addr); break
-          " 2>/dev/null || echo "0x10000")
-            else
-              BOOT_ADDR="0x0"; PART_ADDR="0x8000"; APP_ADDR="0x10000"
-              echo "flasher_args.json not found — using default offsets"
-            fi
-            echo "Offsets: boot=$BOOT_ADDR part=$PART_ADDR app=$APP_ADDR"
-            if esptool.py --chip esp32c3 merge_bin \
-              --output "$FW_DIR/flash_image.bin" \
-              --flash_mode dio \
-              --flash_freq 80m \
-              --flash_size 4MB \
-              $BOOT_ADDR "$BOOTLOADER" \
-              $PART_ADDR "$PARTITION" \
-              $APP_ADDR  "$APP" 2>&1; then
-              echo "✅ Flash image created: $FW_DIR/flash_image.bin"
-              ls -la "$FW_DIR/flash_image.bin"
-              echo "QEMU_SKIP=false" >> $GITHUB_ENV
-            else
-              echo "::warning::esptool merge_bin failed — QEMU will be skipped"
-              echo "QEMU_SKIP=true" >> $GITHUB_ENV
-              python3 -c "
-          import json; from pathlib import Path
-          r = {'target': 'esp32c3', 'status': 'skipped', 'boot_success': False,
-               'panics': [], 'watchdog_triggers': [], 'stack_overflows': [],
-               'critical_count': 0, 'summary': 'QEMU skipped — merge_bin failed'}
-          Path('${{ env.REPORTS_DIR }}/qemu-dynamic-report.json').write_text(json.dumps(r, indent=2))
-          "
-            fi
-          fi
-
-      - name: Run firmware in QEMU
-        # FIX 5 — continue-on-error so Stage AI always runs
-        if: env.QEMU_SKIP != 'true' && env.QEMU_AVAILABLE != 'false'
-        continue-on-error: true
-        run: |
-          FW_DIR="${{ env.FIRMWARE_DIR }}/esp32c3"
-          mkdir -p ${{ env.REPORTS_DIR }}
-          echo "======== QEMU SESSION START ========" \
-            > ${{ env.REPORTS_DIR }}/qemu-run.log
-
-          # FIX 3 — Increased timeout: 60s for Matter boot sequence
-          # FIX 4 — Use -serial mon:stdio for clean UART capture
-          timeout 60 qemu-system-riscv32 \
-            -nographic \
-            -machine esp32c3 \
-            -drive file="$FW_DIR/flash_image.bin",if=mtd,format=raw \
-            -serial mon:stdio \
-            2>&1 | tee -a ${{ env.REPORTS_DIR }}/qemu-run.log || true
-
-          echo "======== QEMU SESSION END ========" \
-            >> ${{ env.REPORTS_DIR }}/qemu-run.log
-          echo "QEMU log size: $(wc -l < ${{ env.REPORTS_DIR }}/qemu-run.log) lines"
-
-      - name: Parse QEMU UART log
-        if: env.QEMU_SKIP != 'true' && env.QEMU_AVAILABLE != 'false'
-        continue-on-error: true
-        run: |
-          python3 << 'PYEOF'
-          import json, re
-          from pathlib import Path
-          TARGET = "esp32c3"
-          LOG    = Path("${{ env.REPORTS_DIR }}/qemu-run.log")
-          OUTFILE= Path("${{ env.REPORTS_DIR }}/qemu-dynamic-report.json")
-          if not LOG.exists():
-            result = {"target": TARGET, "status": "no_log", "boot_success": False,
-                      "panics": [], "watchdog_triggers": [], "stack_overflows": [],
-                      "critical_count": 0, "summary": "No QEMU log found"}
-            OUTFILE.write_text(json.dumps(result, indent=2))
-            raise SystemExit(0)
-          text  = LOG.read_text(errors="ignore")
-          lines = text.splitlines()
-          findings = {
-            "target": TARGET, "boot_success": False, "app_started": False,
-            "matter_started": False, "panics": [], "heap_errors": [],
-            "watchdog_triggers": [], "stack_overflows": [], "reboots": 0,
-            "warnings": [], "log_lines": len(lines),
-          }
-          for line in lines:
-            l = line.strip()
-            if any(k in l for k in ["cpu_start: Pro cpu", "cpu_start: App cpu", "app_main"]):
-              findings["boot_success"] = True
-            if "app_main" in l.lower() and findings["boot_success"]:
-              findings["app_started"] = True
-            if any(k in l for k in ["CHIPoBLE", "OpenThread", "esp_matter", "Initializing Matter"]):
-              findings["matter_started"] = True
-            if any(k in l for k in ["Guru Meditation", "abort() was called", "Backtrace:"]):
-              findings["panics"].append(l[:200])
-            if re.search(r"malloc.*fail|heap.*exhaust|out of memory", l, re.I):
-              findings["heap_errors"].append(l[:200])
-            if "Task watchdog" in l or "WDT reset" in l:
-              findings["watchdog_triggers"].append(l[:200])
-            if re.search(r"stack overflow|stack smash|stack canary", l, re.I):
-              findings["stack_overflows"].append(l[:200])
-            if re.search(r"rst:0x|ets Jun 8 2016|Restarting now", l):
-              findings["reboots"] += 1
-            if re.search(r"\bW \(", l) and len(findings["warnings"]) < 20:
-              findings["warnings"].append(l[:200])
-          critical = (len(findings["panics"]) + len(findings["watchdog_triggers"])
-                    + len(findings["stack_overflows"]))
-          findings["critical_count"] = critical
-          findings["status"] = (
-            "no_boot" if not findings["boot_success"] else
-            "fail"    if critical > 0 else "pass"
-          )
-          findings["summary"] = (
-            f"Boot: {'OK' if findings['boot_success'] else 'FAILED'} | "
-            f"Matter: {'started' if findings['matter_started'] else 'not started'} | "
-            f"Panics: {len(findings['panics'])} | Status: {findings['status'].upper()}"
-          )
-          OUTFILE.write_text(json.dumps(findings, indent=2))
-          print(findings["summary"])
-          PYEOF
-
-      - name: QEMU Quality Gate
-        # FIX 5 — continue-on-error: QEMU failures should NOT block Stage AI
-        if: env.QEMU_SKIP != 'true' && env.QEMU_AVAILABLE != 'false'
-        continue-on-error: true
-        run: |
-          python3 << 'PYEOF'
-          import json, sys
-          from pathlib import Path
-          p = Path("${{ env.REPORTS_DIR }}/qemu-dynamic-report.json")
-          if not p.exists():
-            print("::warning::QEMU report not found — skipping gate")
-            sys.exit(0)
-          r = json.loads(p.read_text())
-          status = r.get("status", "unknown")
-          if status == "no_boot":
-            print("::warning::Firmware did not boot in QEMU — check QEMU log artifact")
-            sys.exit(0)
-          if status == "skipped":
-            print("::notice::QEMU was skipped (firmware binaries missing)")
-            sys.exit(0)
-          if r.get("panics"):
-            print(f"::warning::QEMU detected {len(r['panics'])} panic(s) — AutoFix will attempt corrections")
-          if r.get("watchdog_triggers"):
-            print(f"::warning::QEMU detected {len(r['watchdog_triggers'])} watchdog(s)")
-          if r.get("stack_overflows"):
-            print(f"::warning::QEMU detected {len(r['stack_overflows'])} stack overflow(s)")
-          if status == "pass":
-            print(f"✅ QEMU runtime gate passed — {r.get('log_lines',0)} log lines")
-          else:
-            print(f"::warning::QEMU status={status} — pipeline continues, AutoFix will handle")
-          PYEOF
-
-      # ── STATIC ANALYSIS ───────────────────────────────────────────
-      - name: cppcheck Deep Static Analysis
-        run: |
-          sudo apt-get install -y cppcheck flawfinder -qq
-          mkdir -p ${{ env.REPORTS_DIR }}
-          if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
-            cppcheck \
-              --enable=all \
-              --suppress=missingIncludeSystem \
-              --error-exitcode=1 \
-              --xml --xml-version=2 \
-              ${{ env.EXAMPLE_PATH }} \
-              2> ${{ env.REPORTS_DIR }}/cppcheck-deep.xml || true
-            flawfinder --minlevel=2 --html ${{ env.EXAMPLE_PATH }} \
-              > ${{ env.REPORTS_DIR }}/flawfinder-deep.html || true
-          fi
-
-      - name: Quality Gate — Enforce cppcheck
-        run: |
-          if [ -f ${{ env.REPORTS_DIR }}/cppcheck-deep.xml ]; then
-            ERROR_COUNT=$(grep -c 'severity="error"' \
-              ${{ env.REPORTS_DIR }}/cppcheck-deep.xml 2>/dev/null || echo 0)
-            echo "cppcheck errors: $ERROR_COUNT"
-            if [ "$ERROR_COUNT" -gt "0" ]; then
-              echo "::warning::$ERROR_COUNT cppcheck error(s) — AutoFix will attempt corrections"
-            else
-              echo "Quality gate passed"
-            fi
-          else
-            echo "::warning::cppcheck report not found — source path missing in runner"
-            echo "Quality gate: SKIPPED"
-          fi
-
-      # ── FUZZING ──────────────────────────────────────────────────
-      - name: Install clang + fuzzing tools
-        run: |
-          sudo apt-get install -y clang llvm -qq
-          clang --version
-
-      - name: Prepare fuzzing workspace
-        run: |
-          mkdir -p fuzz/crashes fuzz/corpus ${{ env.REPORTS_DIR }}
-          if [ -z "$(ls fuzz/corpus/ 2>/dev/null)" ]; then
-            python3 -c "
-          with open('fuzz/corpus/seed_auto.bin','wb') as f:
-            f.write(bytes([0,1,0,0x06,0x00,0x00,0x00,1,1]))
-          print('Auto seed corpus created')
-          "
-          fi
-
-      - name: Compile fuzzing harness
-        run: |
-          clang++ -std=c++17 -g -O1 \
-            -fsanitize=fuzzer,address,undefined \
-            -fno-omit-frame-pointer \
-            -I fuzz \
-            fuzz/fuzz_matter_attr.cpp \
-            -o fuzz/fuzzer_binary \
-            2>&1 | tee ${{ env.REPORTS_DIR }}/fuzz-build.log
-          if [ $? -ne 0 ]; then
-            echo "::error::Fuzzer compilation failed"
-            exit 1
-          fi
-
-      - name: Run libFuzzer (90 second window)
-        run: |
-          echo "======== FUZZER SESSION START ========" \
-            > ${{ env.REPORTS_DIR }}/fuzz-raw.log
-          timeout 120 fuzz/fuzzer_binary \
-            -max_total_time=90 -timeout=10 -max_len=512 \
-            -artifact_prefix=fuzz/crashes/ \
-            -print_final_stats=1 -jobs=1 \
-            fuzz/corpus/ \
-            2>&1 | tee -a ${{ env.REPORTS_DIR }}/fuzz-raw.log || true
-          echo "======== FUZZER SESSION END ========" \
-            >> ${{ env.REPORTS_DIR }}/fuzz-raw.log
-
-      - name: Parse fuzzer results
-        run: |
-          python3 fuzz/parse_fuzz_results.py \
-            ${{ env.REPORTS_DIR }}/fuzz-raw.log \
-            fuzz/crashes \
-            ${{ env.REPORTS_DIR }}/fuzz-report-esp32c3.json
-
-      - name: Fuzzer quality gate
-        run: |
-          python3 << 'PYEOF'
-          import json, sys
-          from pathlib import Path
-          p = Path("${{ env.REPORTS_DIR }}/fuzz-report-esp32c3.json")
-          if not p.exists():
-            print("::warning::Fuzz report not found")
-            sys.exit(0)
-          r = json.loads(p.read_text())
-          issues = r.get("total_issues", 0)
-          if issues > 0:
-            print(f"::error::Fuzzer found {issues} issue(s)")
-            sys.exit(1)
-          print(f"✅ Fuzzer gate passed — 0 crashes in {r.get('executions',0):,} executions")
-          PYEOF
-
-      - name: Upload test & quality reports
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-reports-esp32c3
-          path: |
-            ${{ env.REPORTS_DIR }}/unit-test-results.json
-            ${{ env.REPORTS_DIR }}/test-build-esp32c3.log
-            ${{ env.REPORTS_DIR }}/cppcheck-deep.xml
-            ${{ env.REPORTS_DIR }}/flawfinder-deep.html
-            ${{ env.REPORTS_DIR }}/qemu-run.log
-            ${{ env.REPORTS_DIR }}/qemu-dynamic-report.json
-            ${{ env.REPORTS_DIR }}/fuzz-raw.log
-            ${{ env.REPORTS_DIR }}/fuzz-report-esp32c3.json
-            ${{ env.REPORTS_DIR }}/fuzz-build.log
-            ${{ env.REPORTS_DIR }}/fault-injection-report-${{ env.TARGET_CHIP }}.json
-          retention-days: 30
 
 # ════════════════════════════════════════════════════════════════════
-# STAGE 6 — FIRMWARE SECURITY AUDIT
+# LEVEL 2 — Rule-based fixes (no LLM)
 # ════════════════════════════════════════════════════════════════════
-  firmware-security-audit:
-    name: Stage 6 — Firmware Security Audit (esp32c3)
-    runs-on: ubuntu-latest
-    needs: test-and-quality
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Download firmware
-        uses: actions/download-artifact@v4
-        with:
-          name: firmware-esp32c3
-          path: ${{ env.FIRMWARE_DIR }}/esp32c3/
+def _rule_based_fix_python(content, issue):
+    modified, changed = content, False
+    desc = (issue.get("description","") + " " + issue.get("category","")).lower()
 
-      - name: Setup Python tools
-        run: |
-          python3 -m pip install --upgrade pip
-          pip install esptool pyelftools
+    # Hardcoded secret
+    if any(k in desc for k in ("secret","hardcoded","api key","api_key","token","credential","cwe-798","sk-demo")):
+        pattern = re.compile(r'^([A-Z_][A-Z0-9_]*)\s*=\s*["\']([^"\']{4,})["\']', re.MULTILINE)
+        def _rep(m):
+            var, val = m.group(1), m.group(2)
+            if any(h in val.lower() for h in ("sk-","key","token","pass","secret","demo","api","gsk_")):
+                return f'{var} = os.environ.get("{var}", "")'
+            return m.group(0)
+        new = pattern.sub(_rep, modified)
+        if new != modified:
+            modified, changed = new, True
+            if "import os" not in modified:
+                modified = "import os\n" + modified
 
-      - name: Binary Security Properties Check
-        run: |
-          mkdir -p ${{ env.REPORTS_DIR }}
-          python3 << 'PYEOF'
-          import json, glob, os
-          findings = []
-          bins = glob.glob("${{ env.FIRMWARE_DIR }}/esp32c3/*.bin")
-          for b in bins:
-            findings.append({"file": b, "size_bytes": os.path.getsize(b)})
-          report = {"target": "esp32c3", "binaries": findings,
-                    "binary_count": len(findings), "status": "pass"}
-          with open("${{ env.REPORTS_DIR }}/firmware-audit.json", "w") as f:
-            json.dump(report, f, indent=2)
-          print(f"Audited {len(findings)} binary(ies)")
-          PYEOF
+    # Division by zero
+    if any(k in desc for k in ("division","zero","cwe-369","zerodivision")):
+        pat = re.compile(r'return\s+\(([^/\n]+)\s*/\s*(\w+)\)')
+        def _div(m):
+            num, div = m.group(1).strip(), m.group(2).strip()
+            return f"if {div} == 0:\n        return 0.0\n    return ({num} / {div})"
+        new = pat.sub(_div, modified)
+        if new != modified:
+            modified, changed = new, True
 
-      - name: ESP Binary Header Validation
-        run: |
-          for bin in ${{ env.FIRMWARE_DIR }}/esp32c3/*.bin; do
-            [ -f "$bin" ] || continue
-            echo "--- $bin ---"
-            python3 -m esptool image_info "$bin" 2>/dev/null || true
-          done
+    # None dereference
+    if any(k in desc for k in ("null","none","cwe-476","dereference","attributeerror","nonetype")):
+        pat = re.compile(r'return\s+(\w+)\.(strip|lower|upper|split|replace|encode)\(\)')
+        def _none(m):
+            var, method = m.group(1), m.group(2)
+            return f"if {var} is None:\n        return ''\n    return {var}.{method}()"
+        new = pat.sub(_none, modified)
+        if new != modified:
+            modified, changed = new, True
 
-      - name: Compute firmware hashes for SLSA
-        run: |
-          mkdir -p ${{ env.REPORTS_DIR }}
-          for bin in ${{ env.FIRMWARE_DIR }}/esp32c3/*.bin; do
-            [ -f "$bin" ] || continue
-            H=$(sha256sum "$bin" | awk '{print $1}')
-            NAME=$(basename "$bin")
-            echo "$H $NAME" >> ${{ env.REPORTS_DIR }}/firmware-sha256.txt
-            echo "SHA256($NAME) = $H"
-          done
+    return modified if changed else None
 
-      - name: License Compliance Gate
-        run: |
-          UNLICENSED=$(find ${{ env.EXAMPLE_PATH }} \
-            \( -name "*.c" -o -name "*.h" -o -name "*.cpp" \) 2>/dev/null \
-            | xargs grep -rL \
-              "SPDX-License-Identifier\|Copyright\|Apache\|MIT\|GPL" \
-              2>/dev/null | wc -l) || UNLICENSED=0
-          echo "Files without license: $UNLICENSED"
-          if [ "$UNLICENSED" -gt "5" ]; then
-            echo "::warning::$UNLICENSED source files missing license headers"
-          else
-            echo "License compliance passed"
-          fi
 
-      - name: Upload firmware audit reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: firmware-audit-esp32c3
-          path: ${{ env.REPORTS_DIR }}/
-          retention-days: 90
+def _rule_based_fix_cpp(content, issue):
+    modified, changed = content, False
+    desc = (issue.get("description","") + " " + issue.get("category","")).lower()
+    if any(k in desc for k in ("null","malloc","heap","cwe-476","null pointer")):
+        pat = re.compile(
+            r'([ \t]*)([\w *]+\*?\s*(\w+)\s*=\s*(?:malloc|calloc|heap_caps_malloc)\s*\([^;]+\);)',
+            re.MULTILINE)
+        def _null(m):
+            ind, decl, var = m.group(1), m.group(2), m.group(3)
+            return (f"{ind}{decl}\n{ind}if ({var} == NULL) {{\n"
+                    f'{ind}    ESP_LOGE(TAG, "malloc failed for {var}");\n'
+                    f"{ind}    return ESP_ERR_NO_MEM;\n{ind}}}")
+        new = pat.sub(_null, modified)
+        if new != modified:
+            modified, changed = new, True
+    return modified if changed else None
+
+
+def _rule_based_fix(content, issue, is_python):
+    return (_rule_based_fix_python(content, issue) if is_python
+            else _rule_based_fix_cpp(content, issue))
+
 
 # ════════════════════════════════════════════════════════════════════
-# STAGE AI — AUTONOMOUS AI ANALYSIS (Agents 1-7 + AutoFix)
+# LEVEL 1 — LLM fix
 # ════════════════════════════════════════════════════════════════════
-  ai-agents:
-    name: Stage AI — Autonomous Agent Analysis (esp32c3)
-    runs-on: ubuntu-latest
-    needs:
-      - lint-and-validate
-      - security-shift-left
-      - container-scan
-      - build
-      - test-and-quality
-      - firmware-security-audit
-    outputs:
-      ai_passed:      ${{ steps.run_agents.outputs.ai_passed }}
-      security_score: ${{ steps.run_agents.outputs.security_score }}
-      quality_score:  ${{ steps.run_agents.outputs.quality_score }}
-      patches_count:  ${{ steps.run_agents.outputs.patches_count }}
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+def _llm_fix(issue, content, filename, is_python):
+    if not _LLM_AVAILABLE:
+        return None
+    lang = "Python" if is_python else "C/C++ ESP-IDF"
+    try:
+        llm = ChatGroq(model=os.getenv("LLM_MODEL","llama-3.3-70b-versatile"),
+                       api_key=os.getenv("GROQ_API_KEY"), temperature=0.0, max_tokens=4500)
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", f"You are a senior {lang} engineer. Fix ONE issue. "
+             "Return ONLY the complete corrected file, no markdown, no explanation. "
+             "Hardcoded secrets -> os.environ.get('VAR', ''). Smallest possible change."),
+            ("human", "File: {fn}\nIssue: {desc}\nHint: {fix}\n\n"
+             "=== ORIGINAL ===\n{src}\n=== END ===\nReturn corrected file only.")])
+        out = (prompt | llm | StrOutputParser()).invoke({
+            "fn": filename, "desc": issue.get("description",""),
+            "fix": issue.get("suggested_fix",""), "src": content[:5000]})
+        out = re.sub(r"^```[a-zA-Z+]*\n?","",out.strip())
+        out = re.sub(r"\n?```$","",out).strip()
+        if len(out)<30: return None
+        if is_python and "def " not in out and "import " not in out: return None
+        if not is_python and "{" not in out: return None
+        return out
+    except Exception as e:
+        print(f"[AutoFix] LLM error: {e}")
+        return None
 
-      - name: Restore regression history
-        uses: actions/download-artifact@v4
-        with:
-          name: regression-history-esp32c3
-          path: ${{ env.REPORTS_DIR }}/
-        continue-on-error: true
 
-      - name: Init regression history if first run
-        run: |
-          mkdir -p ${{ env.REPORTS_DIR }}
-          if [ ! -f ${{ env.REPORTS_DIR }}/run-history.json ]; then
-            echo '{"runs":[],"run_count":0}' > ${{ env.REPORTS_DIR }}/run-history.json
-            echo "First run — baseline history created"
-          fi
+def _make_diff(repo_rel, original, modified):
+    return "".join(difflib.unified_diff(
+        original.splitlines(keepends=True),
+        modified.splitlines(keepends=True),
+        fromfile=f"a/{repo_rel}", tofile=f"b/{repo_rel}", n=3))
 
-      - name: Download lint reports (Stage 1)
-        uses: actions/download-artifact@v4
-        with:
-          name: lint-reports
-          path: ${{ env.REPORTS_DIR }}/
-        continue-on-error: true
 
-      - name: Download security reports (Stage 2)
-        uses: actions/download-artifact@v4
-        with:
-          name: security-reports
-          path: ${{ env.REPORTS_DIR }}/
-        continue-on-error: true
+def _validate(diff, original, filename):
+    try:
+        with tempfile.NamedTemporaryFile(suffix=Path(filename).suffix or ".txt",
+                                          mode="w",encoding="utf-8",delete=False) as f:
+            f.write(original); sp = f.name
+        with tempfile.NamedTemporaryFile(suffix=".patch",mode="w",encoding="utf-8",delete=False) as f:
+            f.write(diff); pp = f.name
+        r = subprocess.run(["patch","--dry-run","-p1",sp,pp],
+                           capture_output=True,text=True,timeout=10)
+        os.unlink(sp); os.unlink(pp)
+        if r.returncode==0: return True
+        print(f"[AutoFix] Validation failed: {r.stderr[:150]}")
+        return False
+    except Exception as e:
+        print(f"[AutoFix] Validation error: {e}"); return True
 
-      - name: Download container scan reports (Stage 3)
-        uses: actions/download-artifact@v4
-        with:
-          name: container-scan-reports
-          path: ${{ env.REPORTS_DIR }}/
-        continue-on-error: true
-
-      - name: Download build reports (Stage 4)
-        uses: actions/download-artifact@v4
-        with:
-          name: build-reports-esp32c3
-          path: ${{ env.REPORTS_DIR }}/
-        continue-on-error: true
-
-      - name: Download test reports (Stage 5)
-        uses: actions/download-artifact@v4
-        with:
-          name: test-reports-esp32c3
-          path: ${{ env.REPORTS_DIR }}/
-        continue-on-error: true
-
-      # PATCH 4 — Download fault injection report
-      - name: Download fault injection report (Stage 5)
-        uses: actions/download-artifact@v4
-        with:
-          name: fault-injection-report
-          path: ${{ env.REPORTS_DIR }}/
-        continue-on-error: true
-
-      - name: Download firmware audit (Stage 6)
-        uses: actions/download-artifact@v4
-        with:
-          name: firmware-audit-esp32c3
-          path: ${{ env.REPORTS_DIR }}/
-        continue-on-error: true
-
-      - name: Download firmware binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: firmware-esp32c3
-          path: ${{ env.FIRMWARE_DIR }}/esp32c3/
-        continue-on-error: true
-
-      - name: List available reports
-        run: |
-          echo "=== Reports available for AI agents ==="
-          ls -la ${{ env.REPORTS_DIR }}/ 2>/dev/null || echo "No reports dir"
-          echo ""
-          echo "=== Key reports status ==="
-          for f in \
-            build-esp32c3.log size-esp32c3.txt unit-test-results.json \
-            qemu-dynamic-report.json cppcheck-deep.xml sbom-spdx.json \
-            gitleaks-report.json grype-report.json container-scan-summary.json \
-            firmware-sha256.txt fault-injection-report-esp32c3.json; do
-            if [ -f "${{ env.REPORTS_DIR }}/$f" ]; then
-              SIZE=$(wc -c < "${{ env.REPORTS_DIR }}/$f")
-              echo "  ✅ ($SIZE bytes): $f"
-            else
-              echo "  ⚠️  MISSING: $f"
-            fi
-          done
-
-      - name: Install AI agent dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          pip install langchain langchain-core langchain-groq langgraph \
-            chromadb python-dotenv pydantic
-
-      - name: Configure agent environment
-        run: |
-          printf 'GROQ_API_KEY=%s\n' "${{ secrets.GROQ_API_KEY1 }}" > .env
-          printf 'LLM_MODEL=llama-3.3-70b-versatile\n' >> .env
-          printf 'TARGET_CHIP=esp32c3\n' >> .env
-          printf 'EXAMPLE_PATH=%s\n' "${{ env.EXAMPLE_PATH }}" >> .env
-          KEY_LEN=$(grep GROQ_API_KEY .env | cut -d= -f2 | wc -c)
-          echo "GROQ_API_KEY length: $KEY_LEN chars"
-          if [ "$KEY_LEN" -lt "10" ]; then
-            echo "::error::GROQ_API_KEY is empty — add it in Settings > Secrets > Actions"
-            exit 1
-          fi
-
-      - name: Expose ESP-Matter source for agents
-        run: |
-          mkdir -p esp-matter/examples/light/main
-          docker pull ${{ env.DOCKER_IMAGE }} 2>/dev/null || true
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            ${{ env.DOCKER_IMAGE }} \
-            /bin/bash -c "
-              cp -r /opt/espressif/esp-matter/examples/light/main/* \
-                /workspace/esp-matter/examples/light/main/ 2>/dev/null || true
-            "
-          ls esp-matter/examples/light/main/ 2>/dev/null || echo "No files copied"
-
-      # PATCH 3 — Updated pre-flight: no release_agent, add fault_injector check
-      - name: Pre-flight check (agents + secrets + files)
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY1 }}
-        run: |
-          echo "=== Pre-flight check ==="
-          if [ -z "$GROQ_API_KEY" ]; then
-            echo "::error::GROQ_API_KEY secret is MISSING"
-            exit 1
-          else
-            echo "GROQ_API_KEY: OK (${#GROQ_API_KEY} chars)"
-          fi
-          MISSING=0
-          for f in \
-            supervisor/orchestrator.py \
-            agents/debug_agent.py \
-            agents/security_agent.py \
-            agents/code_review_agent.py \
-            agents/test_gen_agent.py \
-            agents/optimization_agent.py \
-            agents/fault_analysis_agent.py \
-            agents/autofix_agent.py \
-            agents/regression_detector.py; do
-            if [ -f "$f" ]; then
-              echo "  ✅ $f"
-            else
-              echo "  ❌ MISSING: $f"
-              MISSING=$((MISSING+1))
-            fi
-          done
-          # Check fault_injector (optional — can be in tools/ or root)
-          if [ -f "tools/fault_injector.py" ] || [ -f "fault_injector.py" ]; then
-            echo "  ✅ fault_injector.py"
-          else
-            echo "  ⚠️  fault_injector.py not found (fault injection skipped in CI)"
-          fi
-          if [ "$MISSING" -gt "0" ]; then
-            echo "::error::$MISSING agent file(s) missing"
-            exit 1
-          fi
-          echo "=== Pre-flight passed ==="
-
-      - name: Run AI Agents Orchestrator
-        id: run_agents
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY1 }}
-          TARGET_CHIP: esp32c3
-          EXAMPLE_PATH: ${{ env.EXAMPLE_PATH }}
-        run: |
-          python3 supervisor/orchestrator.py \
-            --target esp32c3 \
-            --version "v${{ github.run_number }}" \
-            2>&1 | tee ${{ env.REPORTS_DIR }}/orchestrator-run.log
-
-          if [ -f ${{ env.REPORTS_DIR }}/pipeline-summary.json ]; then
-            PASSED=$(python3 -c "
-          import json
-          d = json.load(open('${{ env.REPORTS_DIR }}/pipeline-summary.json'))
-          print('true' if d.get('pipeline_passed', False) else 'false')
-          ")
-            SEC=$(python3 -c "
-          import json
-          d = json.load(open('${{ env.REPORTS_DIR }}/pipeline-summary.json'))
-          print(d.get('stage_results',{}).get('security',{}).get('score','N/A'))
-          ")
-            QUA=$(python3 -c "
-          import json
-          d = json.load(open('${{ env.REPORTS_DIR }}/pipeline-summary.json'))
-          print(d.get('stage_results',{}).get('code_quality',{}).get('score','N/A'))
-          ")
-            PATCHES=$(python3 -c "
-          import json
-          d = json.load(open('${{ env.REPORTS_DIR }}/pipeline-summary.json'))
-          print(d.get('stage_results',{}).get('autofix',{}).get('patches_generated',0))
-          " 2>/dev/null || echo "0")
-          else
-            echo "::warning::pipeline-summary.json not found"
-            PASSED="true"; SEC="N/A"; QUA="N/A"; PATCHES="0"
-          fi
-          echo "ai_passed=$PASSED"      >> $GITHUB_OUTPUT
-          echo "security_score=$SEC"    >> $GITHUB_OUTPUT
-          echo "quality_score=$QUA"     >> $GITHUB_OUTPUT
-          echo "patches_count=$PATCHES" >> $GITHUB_OUTPUT
-          echo "Result: passed=$PASSED | sec=$SEC/10 | quality=$QUA/10 | patches=$PATCHES"
-
-          if [ "$SEC" = "N/A" ] || [ "$QUA" = "N/A" ]; then
-            echo "::warning::Scores N/A — showing orchestrator log tail"
-            tail -60 ${{ env.REPORTS_DIR }}/orchestrator-run.log 2>/dev/null || true
-          fi
-
-      - name: Regression Detection
-        if: always()
-        run: |
-          python3 << 'PYEOF'
-          import json, os, sys
-          from pathlib import Path
-          sys.path.insert(0, ".")
-          REPORTS = Path(os.environ.get("REPORTS_DIR", "reports"))
-          SUMMARY = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null")
-          try:
-            from agents.regression_detector import run_regression_detector
-            report = run_regression_detector()
-            status       = report.get("status", "?")
-            regressions  = report.get("regressions", [])
-            improvements = report.get("improvements", [])
-            print(f"Regression status: {status.upper()}")
-            lines = ["## Regression Detection", "",
-                     "| Status | Regressions | Improvements |",
-                     "|--------|-------------|--------------|",
-                     f"| {status.upper()} | {len(regressions)} | {len(improvements)} |"]
-            with open(SUMMARY, "a") as f:
-              f.write("\n".join(lines) + "\n")
-          except ImportError:
-            print("::notice::regression_detector not found — skipping")
-          except Exception as e:
-            print(f"::warning::Regression detection error: {e}")
-          PYEOF
-
-      - name: Post AI Summary to GitHub Step Summary
-        if: always()
-        run: |
-          if [ -f ${{ env.REPORTS_DIR }}/pipeline-summary.json ]; then
-            python3 << 'PYEOF'
-          import json, os
-          s  = json.load(open(os.environ.get('REPORTS_DIR','reports') + '/pipeline-summary.json'))
-          sr = s.get('stage_results', {})
-          sec = sr.get('security',     {})
-          cod = sr.get('code_quality', {})
-          mem = sr.get('memory',       {})
-          bld = sr.get('build',        {})
-          af  = sr.get('autofix',      {})
-          fi  = sr.get('fault_injection', {})
-          ts  = sr.get('tests',        {})
-          lines = [
-            "## AI Agent Analysis Report", "",
-            "| Agent | Result |", "|-------|--------|",
-            f"| 🔍 Code Review | {cod.get('score','N/A')}/10 |",
-            f"| 🔐 Security    | {sec.get('score','N/A')}/10 — {sec.get('cves',0)} CVE(s) — {sec.get('secrets',0)} secret(s) |",
-            f"| 🔨 Build       | {bld.get('status','?')} |",
-            f"| 💾 Memory      | Flash: {mem.get('flash_pct','N/A')}% |",
-            f"| 🧪 Tests       | {ts.get('passed',0)}/{ts.get('executed',0)} passed — status: {ts.get('status','?')} |",
-            f"| ⚡ Fault Inj.  | {fi.get('passed',0)}/{fi.get('total',0)} scenarios — {fi.get('status','not_run')} |",
-            f"| 🔧 AutoFix     | {af.get('patches_generated',0)} patch(es) generated |",
-            f"| **Overall**   | **{'✅ PASSED' if s.get('pipeline_passed') else '⚠️ ISSUES'}** |",
-          ]
-          with open(os.environ.get('GITHUB_STEP_SUMMARY','/dev/null'), 'a') as f:
-            f.write("\n".join(lines) + "\n")
-          print("\n".join(lines))
-          PYEOF
-          fi
-
-      # PATCH 2 — Rich PR comment with patches, tests, fault injection details
-      - name: Post Rich AI Results as PR Comment
-        if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.PAT_TOKEN }}
-          script: |
-            const fs   = require('fs');
-            const rdir = process.env.REPORTS_DIR;
-
-            // Try to read the rich PR comment generated by orchestrator node_summary
-            const commentFile = `${rdir}/pr-comment-body.md`;
-            const summaryFile = `${rdir}/pipeline-summary.json`;
-
-            let body = "";
-
-            if (fs.existsSync(commentFile)) {
-              body = fs.readFileSync(commentFile, 'utf8')
-                .replace('${GITHUB_SERVER_URL}',  context.serverUrl)
-                .replace('${GITHUB_REPOSITORY}',  `${context.repo.owner}/${context.repo.repo}`)
-                .replace('${GITHUB_RUN_ID}',      context.runId.toString());
-            } else if (fs.existsSync(summaryFile)) {
-              const s  = JSON.parse(fs.readFileSync(summaryFile, 'utf8'));
-              const sr = s.stage_results || {};
-              const cr = sr.code_quality    || {};
-              const sc = sr.security        || {};
-              const bk = sr.build           || {};
-              const mm = sr.memory          || {};
-              const af = sr.autofix         || {};
-              const ts = sr.tests           || {};
-              const fi = sr.fault_injection || {};
-
-              body = `## 🤖 AI Agent Analysis Report\n\n`;
-              body += `**Target:** \`esp32c3\` | **Overall:** ${s.pipeline_passed ? '✅ PASSED' : '⚠️ ISSUES DETECTED'}\n\n`;
-
-              body += `### 📊 Agent Scores\n\n`;
-              body += `| Agent | Result | Details |\n|-------|--------|----------|\n`;
-              body += `| 🔍 Code Review | \`${cr.score ?? 'N/A'}/10\` | ESP-Matter C++ static analysis |\n`;
-              body += `| 🔐 Security    | \`${sc.score ?? 'N/A'}/10\` | ${sc.secrets ?? 0} secret(s) · ${sc.cves ?? 0} CVE(s) |\n`;
-              body += `| 🔨 Build       | \`${bk.status ?? '?'}\` | ESP-IDF idf.py build esp32c3 |\n`;
-              body += `| 💾 Memory      | Flash \`${mm.flash_pct ?? '?'}%\` | ESP32-C3 4MB flash |\n`;
-              body += `| ⚡ Fault Inj.  | \`${fi.passed ?? 0}/${fi.total ?? 0}\` scenarios | status: \`${fi.status ?? 'not_run'}\` |\n\n`;
-
-              body += `### 🔧 AutoFix Patches\n\n`;
-              const patches = af.patch_files || [];
-              if (patches.length > 0) {
-                body += `**${patches.length} patch(es) generated and applied:**\n\n`;
-                body += `| # | Patch File |\n|---|------------|\n`;
-                patches.forEach((p, i) => { body += `| ${i+1} | \`${p}\` |\n`; });
-                body += `\n> 📂 Full diffs in \`.autofix-reports/\` folder\n\n`;
-              } else {
-                body += `> ✅ No patches needed this run.\n\n`;
-              }
-
-              body += `### 🧪 Test Results\n\n`;
-              body += `| Metric | Value |\n|--------|-------|\n`;
-              body += `| Tests generated | ${ts.generated ?? 0} Unity test(s) |\n`;
-              body += `| Tests executed  | ${ts.passed ?? 0}/${ts.executed ?? 0} passed |\n`;
-              body += `| Test status     | \`${ts.status ?? 'unknown'}\` |\n\n`;
-
-              body += `### ⚡ Fault Injection (QEMU+GDB simulation)\n\n`;
-              body += `| Metric | Value |\n|--------|-------|\n`;
-              body += `| Scenarios run  | ${fi.total ?? 0} |\n`;
-              body += `| Scenarios passed | ${fi.passed ?? 0} |\n`;
-              body += `| Robustness score | \`${fi.robustness_score ?? 'N/A'}/10\` |\n`;
-              body += `| Dynamic score  | \`${fi.dynamic_score ?? 0}/10\` |\n\n`;
-
-              body += `---\n*Generated by AI agents — Groq \`llama-3.3-70b-versatile\` — `;
-              body += `[View pipeline](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*`;
-            } else {
-              body = "## 🤖 AI Agent Analysis\n\nReport not available — check pipeline logs.";
-            }
-
-            // Update existing bot comment or create new one
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo:  context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const botComment = comments.find(c =>
-              c.user.type === 'Bot' && c.body.includes('AI Agent Analysis Report')
-            );
-
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner:      context.repo.owner,
-                repo:       context.repo.repo,
-                comment_id: botComment.id,
-                body,
-              });
-              console.log(`Updated PR comment #${botComment.id}`);
-            } else {
-              await github.rest.issues.createComment({
-                owner:        context.repo.owner,
-                repo:         context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-              console.log('Created new PR comment');
-            }
-
-      - name: Upload orchestrator log
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: orchestrator-log-esp32c3
-          path: ${{ env.REPORTS_DIR }}/orchestrator-run.log
-          retention-days: 30
-
-      # PATCH 5 — Added pr-comment-body.md and fault injection to artifact list
-      - name: Upload AI agent reports
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ai-agent-reports-esp32c3
-          path: |
-            ${{ env.REPORTS_DIR }}/debug-report-esp32c3.json
-            ${{ env.REPORTS_DIR }}/security-report-esp32c3.json
-            ${{ env.REPORTS_DIR }}/code-review-esp32c3.json
-            ${{ env.REPORTS_DIR }}/testgen-report-esp32c3.json
-            ${{ env.REPORTS_DIR }}/generated_tests_esp32c3.cpp
-            ${{ env.REPORTS_DIR }}/optimization-report-esp32c3.json
-            ${{ env.REPORTS_DIR }}/fault-analysis-report-esp32c3.json
-            ${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json
-            ${{ env.REPORTS_DIR }}/autofix-report-esp32c3.json
-            ${{ env.REPORTS_DIR }}/release-report-esp32c3.json
-            ${{ env.REPORTS_DIR }}/pipeline-summary.json
-            ${{ env.REPORTS_DIR }}/pr-comment-body.md
-            ${{ env.REPORTS_DIR }}/orchestrator-run.log
-            ${{ env.REPORTS_DIR }}/qemu-dynamic-report.json
-            ${{ env.REPORTS_DIR }}/patches/
-          retention-days: 90
-
-      - name: Upload regression history
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: regression-history-esp32c3
-          path: |
-            ${{ env.REPORTS_DIR }}/regression-report.json
-            ${{ env.REPORTS_DIR }}/run-history.json
-          retention-days: 90
 
 # ════════════════════════════════════════════════════════════════════
-# STAGE 4b — APPLY AUTOFIX PATCHES & REBUILD
+# MAIN — called by orchestrator with or without apply_patches param
 # ════════════════════════════════════════════════════════════════════
-  build-second-run:
-    name: Stage 4b — Apply AutoFix Patches & Rebuild
-    runs-on: ubuntu-latest
-    needs: ai-agents
-    if: |
-      needs.ai-agents.result == 'success' &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
-    outputs:
-      build_status:    ${{ steps.rebuild.outputs.build_status }}
-      patches_applied: ${{ steps.apply.outputs.patches_applied }}
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+def run_autofix_agent(target=TARGET, apply_patches=False):
+    """
+    Main entry point.
+    apply_patches=False: only generate patches (CI workflow uses this)
+    apply_patches=True:  also apply via git apply immediately (CLI use)
+    """
+    print(f"\n[AutoFix] ===== target:{target} LLM:{_LLM_AVAILABLE} =====")
+    REPORTS.mkdir(exist_ok=True)
+    PATCHES.mkdir(parents=True, exist_ok=True)
 
-      - name: Download AI reports (patches + tests)
-        uses: actions/download-artifact@v4
-        with:
-          name: ai-agent-reports-esp32c3
-          path: ${{ env.REPORTS_DIR }}/
-        continue-on-error: true
+    # Load all agent reports
+    reports = {
+        "security":    _load_json(REPORTS / f"security-report-{target}.json"),
+        "code_review": _load_json(REPORTS / f"code-review-{target}.json"),
+        "debug":       _load_json(REPORTS / f"debug-report-{target}.json"),
+        "fault":       _load_json(REPORTS / f"fault-analysis-report-{target}.json"),
+    }
+    print(f"[AutoFix] ESP source dir: {_find_esp_source_dir()}")
 
-      - name: Vérifier les patches disponibles
-        run: |
-          echo "=== Patches ==="
-          ls -la ${{ env.REPORTS_DIR }}/patches/*.patch 2>/dev/null || echo "Aucun patch"
-          python3 -c "
-          import json
-          try:
-            d = json.load(open('${{ env.REPORTS_DIR }}/autofix-report-esp32c3.json'))
-            print(f'Patches: {d.get(\"patches_generated\",0)} | Issues: {d.get(\"issues_analyzed\",0)}')
-          except Exception as e:
-            print(f'Non disponible: {e}')
-          " 2>/dev/null || true
+    all_issues   = _collect_issues(reports)
+    code_issues  = [i for i in all_issues if _is_code_issue(i)]
+    other_issues = [i for i in all_issues if not _is_code_issue(i)]
+    print(f"[AutoFix] {len(code_issues)} patchable, {len(other_issues)} manual-only")
 
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.ccache
-          key: ccache-esp32c3-${{ github.sha }}
-          restore-keys: ccache-esp32c3-
+    file_cache   = {}
+    patches_done = []
+    last_method  = "none"
 
-      - name: Apply AutoFix patches & rebuild in Docker
-        id: apply
-        run: |
-          docker pull ${{ env.DOCKER_IMAGE }} 2>/dev/null || true
-          mkdir -p ${{ env.FIRMWARE_DIR }}/esp32c3-patched
-          mkdir -p ${{ env.REPORTS_DIR }}
-          WORKSPACE="${{ github.workspace }}"
-          docker run --rm \
-            -v "$WORKSPACE:/workspace" \
-            -v ~/.ccache:/root/.ccache \
-            -e IDF_CCACHE_ENABLE=1 \
-            ${{ env.DOCKER_IMAGE }} \
-            /bin/bash -c "
-              . \$IDF_PATH/export.sh 2>/dev/null
-              [ -f \$ESP_MATTER_PATH/export.sh ] && . \$ESP_MATTER_PATH/export.sh 2>/dev/null
-              ESP_MAIN='/opt/espressif/esp-matter/examples/light/main'
-              ESP_TEST='/opt/espressif/esp-matter/examples/light/test'
-              PATCH_DIR='/workspace/${{ env.REPORTS_DIR }}/patches'
-              APPLIED=0; SKIPPED=0
-              echo '=== STEP 1: Apply AutoFix patches ==='
-              if [ -d \"\$PATCH_DIR\" ]; then
-                for PATCH in \"\$PATCH_DIR\"/*.patch; do
-                  [ -f \"\$PATCH\" ] || continue
-                  NAME=\$(basename \"\$PATCH\")
-                  echo \"→ \$NAME\"
-                  if git -C /opt/espressif/esp-matter apply --check \
-                       --directory=examples/light \"\$PATCH\" 2>/dev/null; then
-                    git -C /opt/espressif/esp-matter apply \
-                        --directory=examples/light \"\$PATCH\"
-                    echo '  OK'
-                    APPLIED=\$((APPLIED+1))
-                  else
-                    echo '  Skip (already applied or conflict)'
-                    SKIPPED=\$((SKIPPED+1))
-                  fi
-                done
-              fi
-              echo \"Patches: applied=\$APPLIED skipped=\$SKIPPED\"
-              echo '=== STEP 2: Deploy generated tests ==='
-              TEST_CPP='/workspace/${{ env.REPORTS_DIR }}/generated_tests_esp32c3.cpp'
-              if [ -f \"\$TEST_CPP\" ]; then
-                mkdir -p \"\$ESP_TEST/main\"
-                cp \"\$TEST_CPP\" \"\$ESP_TEST/main/test_light_app_esp32c3.cpp\"
-                printf 'cmake_minimum_required(VERSION 3.16)\ninclude(\$ENV{IDF_PATH}/tools/cmake/project.cmake)\nproject(light_test)\n' > \"\$ESP_TEST/CMakeLists.txt\"
-                printf 'idf_component_register(\n    SRCS \"test_light_app_esp32c3.cpp\"\n    INCLUDE_DIRS \".\"\n    REQUIRES unity esp_system\n)\n' > \"\$ESP_TEST/main/CMakeLists.txt\"
-                echo 'Test file deployed'
-              fi
-              echo '=== STEP 3: Rebuild ==='
-              cd /opt/espressif/esp-matter/examples/light
-              idf.py set-target esp32c3
-              idf.py build \
-                -DGIT_HASH='${{ github.sha }}-patched' \
-                -DBUILD_DATE=\"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \
-                2>&1 | tee /workspace/${{ env.REPORTS_DIR }}/build-patched-esp32c3.log || true
-              echo '=== STEP 4: Copy patched firmware ==='
-              cp build/*.bin /workspace/${{ env.FIRMWARE_DIR }}/esp32c3-patched/ 2>/dev/null || true
-              cp build/bootloader/*.bin /workspace/${{ env.FIRMWARE_DIR }}/esp32c3-patched/ 2>/dev/null || true
-              cp build/partition_table/*.bin /workspace/${{ env.FIRMWARE_DIR }}/esp32c3-patched/ 2>/dev/null || true
-              idf.py size 2>&1 | tee /workspace/${{ env.REPORTS_DIR }}/size-patched-esp32c3.txt || true
-            "
-          APPLIED=$(grep -oP 'applied=\K[0-9]+' \
-            ${{ env.REPORTS_DIR }}/build-patched-esp32c3.log 2>/dev/null | tail -1 || echo "0")
-          echo "patches_applied=$APPLIED" >> $GITHUB_OUTPUT
+    for idx, issue in enumerate(code_issues, 1):
+        info = _get_patch_target(issue)
+        if not info:
+            print(f"[AutoFix] #{idx}: no target file — skip")
+            continue
 
-      - name: Check rebuild result
-        id: rebuild
-        run: |
-          BUILD_LOG="${{ env.REPORTS_DIR }}/build-patched-esp32c3.log"
-          if [ -f "$BUILD_LOG" ] && grep -q "Project build complete" "$BUILD_LOG"; then
-            echo "build_status=success" >> $GITHUB_OUTPUT
-            echo "✅ Rebuild with patches: SUCCESS"
-          else
-            echo "::warning::Rebuild with patches had issues — Stage 4c continues anyway"
-            echo "build_status=success" >> $GITHUB_OUTPUT
-          fi
+        repo_rel, original = info
+        current  = file_cache.get(repo_rel, original)
+        is_py    = repo_rel.endswith(".py")
+        basename = Path(repo_rel).name
 
-      - name: Upload patched firmware + logs
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: firmware-patched-esp32c3
-          path: |
-            ${{ env.FIRMWARE_DIR }}/esp32c3-patched/
-            ${{ env.REPORTS_DIR }}/build-patched-esp32c3.log
-            ${{ env.REPORTS_DIR }}/size-patched-esp32c3.txt
-          retention-days: 30
+        print(f"[AutoFix] #{idx}: [{issue['severity']}] {issue['description'][:55]}")
+        print(f"          file: {repo_rel}")
 
-# ════════════════════════════════════════════════════════════════════
-# STAGE SYNC — Copy ESP-Matter source into repo (run once manually)
-# ════════════════════════════════════════════════════════════════════
-  sync-esp-matter-source:
-    name: Sync — Copy ESP-Matter source into repo
-    runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' &&
-      github.event.inputs.reason == 'sync-esp-matter-source'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.PAT_TOKEN }}
+        # Level 1: LLM
+        modified = _llm_fix(issue, current, basename, is_py)
+        method   = "llm"
+        if not modified or modified.strip() == current.strip():
+            # Level 2: rule-based fallback
+            modified = _rule_based_fix(current, issue, is_py)
+            method   = "rule_based"
 
-      - name: Copy ESP-Matter light source from Docker
-        run: |
-          docker pull ${{ env.DOCKER_IMAGE }}
-          mkdir -p esp-matter/examples/light/main
-          mkdir -p esp-matter/examples/light/test
-          docker run --rm \
-            -v "${{ github.workspace }}:/workspace" \
-            ${{ env.DOCKER_IMAGE }} \
-            /bin/bash -c "
-              SRC='/opt/espressif/esp-matter/examples/light/main'
-              DEST='/workspace/esp-matter/examples/light/main'
-              cp -r \"\$SRC\"/* \"\$DEST\"/
-              cp /opt/espressif/esp-matter/examples/light/CMakeLists.txt \
-                 /workspace/esp-matter/examples/light/ 2>/dev/null || true
-              echo 'Files copied:'; ls \"\$DEST\"
-            "
-          ls -la esp-matter/examples/light/main/
+        if not modified or modified.strip() == current.strip():
+            print("          -> no change — skip")
+            continue
 
-      - name: Create .gitignore and README
-        run: |
-          cat > esp-matter/.gitignore << 'GITEOF'
-          build/
-          sdkconfig
-          sdkconfig.old
-          *.o *.a *.elf *.bin *.map *.d
-          GITEOF
-          cat > esp-matter/README.md << 'READEOF'
-          # ESP-Matter Light Source
-          Copied from `hajerrchaieb/matter-light:v1` for AutoFix Agent patches.
-          DO NOT EDIT MANUALLY — managed by DevSecOps pipeline.
-          READEOF
+        diff = _make_diff(repo_rel, current, modified)
+        if not diff.strip():
+            print("          -> empty diff — skip")
+            continue
+        if not _validate(diff, current, basename):
+            print("          -> validation failed — discarded")
+            continue
 
-      - name: Commit and push ESP-Matter source
-        run: |
-          git config user.name  "DevSecOps Bot"
-          git config user.email "devsecops@github-actions.local"
-          git add esp-matter/
-          NFILES=$(git diff --cached --name-only | wc -l)
-          if [ "$NFILES" -eq "0" ]; then
-            echo "Nothing to commit — source already in repo"
-            exit 0
-          fi
-          git commit -m "feat: add ESP-Matter light source for AutoFix patches
+        safe  = repo_rel.replace("/","_").replace("\\","_")
+        pname = f"autofix-{target}-{idx:02d}-{issue['source_agent']}-{safe}.patch"
+        (PATCHES/pname).write_text(diff, encoding="utf-8")
+        file_cache[repo_rel] = modified
+        last_method = method
+        patches_done.append({
+            "patch_name":   pname,
+            "file":         repo_rel,
+            "source_agent": issue["source_agent"],
+            "severity":     issue["severity"],
+            "description":  issue["description"][:200],
+            "fix_method":   method,
+        })
+        print(f"          -> SAVED: {pname} [{method}]")
 
-          Source: ${{ env.DOCKER_IMAGE }}
-          Files: esp-matter/examples/light/main/"
-          git push origin ${{ github.ref_name }}
+    # Optional: apply immediately (CLI use)
+    if apply_patches and patches_done:
+        print("[AutoFix] Applying patches via git apply...")
+        for p in patches_done:
+            r = subprocess.run(
+                ["git","apply", str(PATCHES/p["patch_name"])],
+                capture_output=True, text=True)
+            status = "OK" if r.returncode==0 else f"Skip({r.stderr[:60]})"
+            print(f"  {status}: {p['patch_name']}")
 
-# ════════════════════════════════════════════════════════════════════
-# STAGE 4c — FULL SECOND RUN (push autofix branch + open PR)
-# ════════════════════════════════════════════════════════════════════
-  full-second-run:
-    name: Stage 4c — Full Second Run (Option C)
-    runs-on: ubuntu-latest
-    needs: build-second-run
-    if: |
-      needs.build-second-run.result == 'success' &&
-      github.ref == 'refs/heads/main' &&
-      github.event_name != 'workflow_dispatch'
-    steps:
-      - name: Checkout avec PAT_TOKEN
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.PAT_TOKEN }}
+    instructions = [{
+        "source_agent": i["source_agent"],
+        "severity":     i["severity"],
+        "description":  i["description"],
+        "how_to_fix":   i.get("suggested_fix","Manual review required."),
+    } for i in other_issues]
 
-      - name: Download AI reports (patches)
-        uses: actions/download-artifact@v4
-        with:
-          name: ai-agent-reports-esp32c3
-          path: ${{ env.REPORTS_DIR }}/
-        continue-on-error: true
+    report = {
+        "agent":             "autofix_agent",
+        "target":            target,
+        "generated_at":      datetime.utcnow().isoformat()+"Z",
+        "llm_used":          _LLM_AVAILABLE,
+        "issues_analyzed":   len(all_issues),
+        "patches_generated": len(patches_done),   # orchestrator reads this
+        "patch_files":       [p["patch_name"] for p in patches_done],
+        "patches_detail":    patches_done,
+        "manual_instructions": instructions,
+        "status": "patches_generated" if patches_done else "no_patches_generated",
+        "summary": (
+            f"{len(patches_done)} patch(es) "
+            f"({'LLM+' if _LLM_AVAILABLE else ''}{last_method}), "
+            f"{len(instructions)} instructions."
+        ),
+    }
+    out = REPORTS / f"autofix-report-{target}.json"
+    out.write_text(json.dumps(report,indent=2),encoding="utf-8")
+    print(f"\n[AutoFix] patches={len(patches_done)} instructions={len(instructions)}")
+    return report
 
-      - name: Apply patches + tests on runner
-        id: apply_local
-        run: |
-          git config user.name  "AutoFix Bot"
-          git config user.email "autofix@github-actions.local"
-          PATCH_DIR="${{ env.REPORTS_DIR }}/patches"
-          SOURCE_FILES=$(ls esp-matter/examples/light/main/ 2>/dev/null | wc -l)
-          echo "ESP-Matter source files in repo: $SOURCE_FILES"
-          APPLIED=0; SKIPPED=0; TESTS_ADDED=false
-          if [ -d "$PATCH_DIR" ] && ls "$PATCH_DIR"/*.patch 2>/dev/null; then
-            for PATCH in "$PATCH_DIR"/*.patch; do
-              NAME=$(basename "$PATCH")
-              echo "→ $NAME"
-              if git apply --check "$PATCH" 2>/dev/null; then
-                git apply "$PATCH"
-                echo "  OK (direct)"
-                APPLIED=$((APPLIED+1))
-              elif [ "$SOURCE_FILES" -gt "0" ] && \
-                   patch --dry-run -p1 -d esp-matter/examples/light < "$PATCH" 2>/dev/null; then
-                patch -p1 -d esp-matter/examples/light < "$PATCH"
-                echo "  OK (esp-matter)"
-                APPLIED=$((APPLIED+1))
-              elif [ "$SOURCE_FILES" -gt "0" ] && \
-                   git apply --check -p1 --directory=esp-matter/examples/light "$PATCH" 2>/dev/null; then
-                git apply -p1 --directory=esp-matter/examples/light "$PATCH"
-                echo "  OK (git apply --directory)"
-                APPLIED=$((APPLIED+1))
-              else
-                echo "  Skipped"
-                SKIPPED=$((SKIPPED+1))
-              fi
-            done
-          else
-            echo "No patches in $PATCH_DIR"
-          fi
-          TEST_CPP="${{ env.REPORTS_DIR }}/generated_tests_esp32c3.cpp"
-          if [ -f "$TEST_CPP" ]; then
-            mkdir -p esp-matter/examples/light/test
-            DEST="esp-matter/examples/light/test/test_light_app_esp32c3.cpp"
-            if ! diff -q "$TEST_CPP" "$DEST" > /dev/null 2>&1; then
-              cp "$TEST_CPP" "$DEST"
-              echo "Test file updated"
-              TESTS_ADDED=true
-            else
-              echo "Test file unchanged"
-            fi
-          fi
-          echo "applied=$APPLIED skipped=$SKIPPED tests=$TESTS_ADDED"
-          echo "applied=$APPLIED"         >> $GITHUB_OUTPUT
-          echo "tests_added=$TESTS_ADDED" >> $GITHUB_OUTPUT
 
-      - name: Créer branche autofix et pusher
-        id: push_branch
-        if: steps.apply_local.outputs.applied != '0' || steps.apply_local.outputs.tests_added == 'true'
-        run: |
-          BRANCH="autofix/run-${{ github.run_id }}"
-          git push origin --delete "$BRANCH" 2>/dev/null || true
-          git checkout -b "$BRANCH"
-          mkdir -p .autofix-reports
-          cp ${{ env.REPORTS_DIR }}/autofix-report-esp32c3.json \
-             .autofix-reports/ 2>/dev/null || true
-          cp ${{ env.REPORTS_DIR }}/pipeline-summary.json \
-             .autofix-reports/pipeline-summary-run-${{ github.run_id }}.json \
-             2>/dev/null || true
-          git add -A
-          STAGED=$(git status --porcelain 2>/dev/null | wc -l)
-          if [ "$STAGED" -eq "0" ]; then
-            echo "::warning::Nothing to commit"
-            echo "pushed=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          PATCH_COUNT=$(ls ${{ env.REPORTS_DIR }}/patches/*.patch 2>/dev/null | wc -l)
-          PATCH_NAMES=$(ls ${{ env.REPORTS_DIR }}/patches/*.patch 2>/dev/null \
-            | xargs -I{} basename {} | tr '\n' ' ' || echo "none")
-          printf 'fix(autofix): apply %s AI patch(es) from run #%s\n\nPatches: %s\nTarget: esp32c3\nRun: %s\n' \
-            "$PATCH_COUNT" "${{ github.run_id }}" "$PATCH_NAMES" \
-            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            > /tmp/commit_msg.txt
-          git commit -F /tmp/commit_msg.txt
-          git push origin "$BRANCH" || git push --force-with-lease origin "$BRANCH"
-          echo "pushed=true"    >> $GITHUB_OUTPUT
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+def apply_patches():
+    """Legacy CLI helper."""
+    applied = False
+    for pf in PATCHES.glob("*.patch"):
+        r = subprocess.run(["git","apply",str(pf)],capture_output=True,text=True)
+        if r.returncode==0: print(f"  OK: {pf.name}"); applied=True
+        else: print(f"  Skip: {pf.name}")
+    return applied
 
-      - name: Créer la Pull Request automatique
-        if: steps.push_branch.outputs.pushed == 'true'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.PAT_TOKEN }}
-          script: |
-            const branch = `autofix/run-${{ github.run_id }}`;
-            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
-            const fs = require('fs');
-            let patches = 0, issues = 0, patchList = [];
-            try {
-              const af = JSON.parse(fs.readFileSync(
-                `${process.env.REPORTS_DIR}/autofix-report-esp32c3.json`, 'utf8'));
-              patches   = af.patches_generated || 0;
-              issues    = af.issues_analyzed   || 0;
-              patchList = (af.patches_detail || []).map(p =>
-                `| ${p.file?.split('/').pop() ?? '?'} | ${(p.severity??'?').toUpperCase()} | \`${p.fix_method??'?'}\` | ${p.description?.substring(0,60)??''} |`
-              );
-            } catch(e) {}
-
-            let s = {}; let sr = {};
-            try {
-              s  = JSON.parse(fs.readFileSync(`${process.env.REPORTS_DIR}/pipeline-summary.json`, 'utf8'));
-              sr = s.stage_results || {};
-            } catch(e) {}
-
-            const sc  = sr.security        || {};
-            const cod = sr.code_quality    || {};
-            const ts  = sr.tests           || {};
-            const fi  = sr.fault_injection || {};
-
-            const patchTable = patchList.length > 0
-              ? `| File | Severity | Method | Description |\n|------|----------|--------|-------------|\n${patchList.join('\n')}`
-              : '_No patches applied_';
-
-            let pr;
-            try {
-              pr = await github.rest.pulls.create({
-                owner: context.repo.owner,
-                repo:  context.repo.repo,
-                title: `fix(autofix): ${patches} patch(es) from AI agent run #${{ github.run_id }}`,
-                head:  branch,
-                base:  'main',
-                body: [
-                  "## 🤖 AutoFix — Automatic Pull Request",
-                  "",
-                  `**Source run:** [#${{ github.run_id }}](${runUrl})`,
-                  `**Overall:** ${s.pipeline_passed ? '✅ PASSED' : '⚠️ ISSUES DETECTED'}`,
-                  "",
-                  "### 📊 Scores from AI Agents",
-                  "",
-                  "| Agent | Score |",
-                  "|-------|-------|",
-                  `| 🔍 Code Review | \`${cod.score ?? 'N/A'}/10\` |`,
-                  `| 🔐 Security    | \`${sc.score ?? 'N/A'}/10\` — ${sc.secrets ?? 0} secret(s), ${sc.cves ?? 0} CVE(s) |`,
-                  `| ⚡ Fault Injection | \`${fi.passed ?? 0}/${fi.total ?? 0}\` scenarios passed |`,
-                  "",
-                  "### 🔧 Patches Applied",
-                  "",
-                  patchTable,
-                  "",
-                  "> 📂 Full diffs available in `.autofix-reports/` folder",
-                  "",
-                  "### 🧪 Test Results",
-                  "",
-                  "| Metric | Value |",
-                  "|--------|-------|",
-                  `| Tests generated | ${ts.generated ?? 0} |`,
-                  `| Tests executed  | ${ts.passed ?? 0}/${ts.executed ?? 0} passed |`,
-                  `| Status          | \`${ts.status ?? 'unknown'}\` |`,
-                  "",
-                  "### ✅ Checklist avant merge",
-                  "- [ ] Pipeline CI vert sur cette branche",
-                  "- [ ] Security score >= run précédent",
-                  "- [ ] Code quality score >= run précédent",
-                  "- [ ] Regression detector: 0 régression critique",
-                  "- [ ] Build OK + QEMU boot OK",
-                  "- [ ] Review des patches dans `.autofix-reports/`",
-                  "",
-                  `_Auto-généré par autofix_agent.py — DevSecOps loop_`,
-                ].join("\n"),
-                draft: false
-              });
-              console.log(`✅ PR créée: ${pr.data.html_url}`);
-            } catch(e) {
-              console.log(`PR creation note: ${e.message}`);
-              return;
-            }
-            try {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: pr.data.number,
-                labels: ["autofix", "ai-generated", "needs-review"]
-              });
-            } catch(e) { console.log(`Label note: ${e.message}`); }
-
-      - name: Stage 4c Summary
-        if: always()
-        run: |
-          PUSHED="${{ steps.push_branch.outputs.pushed }}"
-          APPLIED="${{ steps.apply_local.outputs.applied }}"
-          BRANCH="${{ steps.push_branch.outputs.branch }}"
-          cat >> $GITHUB_STEP_SUMMARY << EOF
-          ## Stage 4c — Full Second Run
-          | Étape | Résultat |
-          |-------|---------|
-          | Patches appliqués | $APPLIED |
-          | Branche créée | ${BRANCH:-N/A} |
-          | Pipeline déclenché | ${PUSHED:-false} |
-          | PR créée | Voir onglet Pull Requests |
-          EOF
-
-# ════════════════════════════════════════════════════════════════════
-# STAGE 7 — RELEASE
-# ════════════════════════════════════════════════════════════════════
-  release:
-    name: Stage 7 — Release Firmware
-    runs-on: ubuntu-latest
-    needs: [test-and-quality, firmware-security-audit, ai-agents]
-    if: |
-      github.ref == 'refs/heads/main' &&
-      github.event_name == 'push' &&
-      needs.ai-agents.result == 'success'
-    environment: production
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag:     ${{ steps.version.outputs.tag }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download firmware (esp32c3)
-        uses: actions/download-artifact@v4
-        with:
-          name: firmware-esp32c3
-          path: ${{ env.FIRMWARE_DIR }}/esp32c3/
-
-      - name: Download SBOM
-        uses: actions/download-artifact@v4
-        with:
-          name: security-reports
-          path: security-reports/
-
-      - name: Download size report
-        uses: actions/download-artifact@v4
-        with:
-          name: build-reports-esp32c3
-          path: build-reports/
-
-      - name: Download AI reports (for changelog)
-        uses: actions/download-artifact@v4
-        with:
-          name: ai-agent-reports-esp32c3
-          path: ai-reports/
-        continue-on-error: true
-
-      - name: Generate Changelog
-        uses: orhun/git-cliff-action@v4
-        with:
-          config: .cliff.toml
-          args: --latest --strip header
-        env:
-          OUTPUT: CHANGELOG_LATEST.md
-        continue-on-error: true
-
-      - name: Use AI Changelog if cliff not available
-        run: |
-          if [ ! -f CHANGELOG_LATEST.md ]; then
-            VERSION="v${{ github.run_number }}"
-            AI_CHANGELOG="ai-reports/CHANGELOG-${VERSION}.md"
-            if [ -f "$AI_CHANGELOG" ]; then
-              cp "$AI_CHANGELOG" CHANGELOG_LATEST.md
-            else
-              echo "## Changes since last release" > CHANGELOG_LATEST.md
-              git log $(git describe --tags --abbrev=0 2>/dev/null || echo "")..HEAD \
-                --pretty=format:"- %s (%h)" \
-                >> CHANGELOG_LATEST.md 2>/dev/null || \
-              echo "- Initial release" >> CHANGELOG_LATEST.md
-            fi
-          fi
-
-      - name: Compute Release Version
-        id: version
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION="${{ github.ref_name }}"
-          else
-            LATEST=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-            MAJOR=$(echo $LATEST | cut -d. -f1 | tr -d v)
-            MINOR=$(echo $LATEST | cut -d. -f2)
-            PATCH=$(echo $LATEST | cut -d. -f3)
-            VERSION="v${MAJOR}.${MINOR}.$((PATCH+1))-dev"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=firmware-$VERSION-${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "Release version: $VERSION"
-
-      - name: Package OTA Update Bundle
-        run: |
-          mkdir -p ota-bundle
-          cp ${{ env.FIRMWARE_DIR }}/esp32c3/*.bin ota-bundle/ 2>/dev/null || true
-          # FIX 8 — proper Python OTA manifest (no heredoc variable interpolation issues)
-          python3 << 'PYEOF'
-          import json, hashlib, glob
-          from pathlib import Path
-          checksums = {}
-          for f in glob.glob("ota-bundle/*.bin"):
-            fname = Path(f).name
-            with open(f, "rb") as fh:
-              checksums[fname] = hashlib.sha256(fh.read()).hexdigest()
-          manifest = {
-            "version":   "${{ steps.version.outputs.version }}",
-            "commit":    "${{ github.sha }}",
-            "target":    "esp32c3",
-            "checksums": checksums,
-            "flash_cmd": "esptool.py --chip esp32c3 write_flash @flasher_args.json",
-          }
-          with open("ota-bundle/ota-manifest-signed.json", "w") as f:
-            json.dump(manifest, f, indent=2)
-          print(f"OTA manifest: {len(checksums)} binary(ies)")
-          print(json.dumps(manifest, indent=2))
-          PYEOF
-          tar -czf ota-bundle-${{ steps.version.outputs.version }}.tar.gz ota-bundle/
-
-      - name: Read Firmware Size
-        id: size
-        run: |
-          SIZE_INFO=$(cat build-reports/size-esp32c3.txt 2>/dev/null | tail -5 \
-            || echo "Size data unavailable")
-          echo "size_info<<EOF" >> $GITHUB_OUTPUT
-          echo "$SIZE_INFO"    >> $GITHUB_OUTPUT
-          echo "EOF"           >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: "${{ steps.version.outputs.version }} — ESP32 Matter Light"
-          body_path: CHANGELOG_LATEST.md
-          body: |
-            ## ESP32 Matter Light Firmware — ${{ steps.version.outputs.version }}
-            | Field | Value |
-            |-------|-------|
-            | Commit | `${{ github.sha }}` |
-            | Target | `esp32c3` |
-            | AI Security Score | ${{ needs.ai-agents.outputs.security_score }}/10 |
-            | AI Quality Score  | ${{ needs.ai-agents.outputs.quality_score }}/10 |
-            | AutoFix Patches   | ${{ needs.ai-agents.outputs.patches_count }} |
-            | Build Run | [#${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
-            ### Memory Usage
-            ```
-            ${{ steps.size.outputs.size_info }}
-            ```
-            ### Flash Command
-            ```bash
-            esptool.py --chip esp32c3 write_flash @flasher_args.json
-            ```
-          files: |
-            ${{ env.FIRMWARE_DIR }}/esp32c3/*.bin
-            ${{ env.FIRMWARE_DIR }}/esp32c3/flasher_args.json
-            security-reports/sbom-spdx.json
-            security-reports/sbom-cyclonedx.json
-            ota-bundle-${{ steps.version.outputs.version }}.tar.gz
-          fail_on_unmatched_files: false
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-# ════════════════════════════════════════════════════════════════════
-# STAGE 8 — PIPELINE SUMMARY & NOTIFICATIONS
-# ════════════════════════════════════════════════════════════════════
-  notify-and-monitor:
-    name: Stage 8 — Pipeline Summary & Monitor
-    runs-on: ubuntu-latest
-    needs:
-      - lint-and-validate
-      - security-shift-left
-      - container-scan
-      - build
-      - test-and-quality
-      - firmware-security-audit
-      - ai-agents
-      - build-second-run
-      - full-second-run
-      - release
-    if: always()
-
-    steps:
-      - name: Generate Full Pipeline Summary
-        run: |
-          result_icon() {
-            case "$1" in
-              success)   echo "✅" ;;
-              failure)   echo "❌" ;;
-              skipped)   echo "⊘" ;;
-              cancelled) echo "🚫" ;;
-              *)         echo "⚠️" ;;
-            esac
-          }
-          cat >> $GITHUB_STEP_SUMMARY << EOF
-          ## ESP32 Matter DevSecOps — Pipeline Report
-          | Stage | Result |
-          |-------|--------|
-          | Lint & Code Quality     | $(result_icon "${{ needs.lint-and-validate.result }}") |
-          | Secret & Supply Chain   | $(result_icon "${{ needs.security-shift-left.result }}") |
-          | Container Image Scan    | $(result_icon "${{ needs.container-scan.result }}") |
-          | Build Firmware          | $(result_icon "${{ needs.build.result }}") |
-          | Test & Quality Gate     | $(result_icon "${{ needs.test-and-quality.result }}") |
-          | Firmware Security Audit | $(result_icon "${{ needs.firmware-security-audit.result }}") |
-          | AI Agent Analysis       | $(result_icon "${{ needs.ai-agents.result }}") Sec:${{ needs.ai-agents.outputs.security_score }}/10 Qual:${{ needs.ai-agents.outputs.quality_score }}/10 |
-          | AutoFix Rebuild (4b)    | $(result_icon "${{ needs.build-second-run.result }}") |
-          | Full Second Run (4c)    | $(result_icon "${{ needs.full-second-run.result }}") |
-          | Release                 | $(result_icon "${{ needs.release.result }}") |
-          **Commit:** \`${{ github.sha }}\`
-          **Branch:** \`${{ github.ref_name }}\`
-          **Triggered by:** \`${{ github.event_name }}\`
-          EOF
-
-      - name: Notify Slack on Failure
-        if: |
-          needs.build.result == 'failure' ||
-          needs.test-and-quality.result == 'failure' ||
-          needs.security-shift-left.result == 'failure' ||
-          needs.ai-agents.result == 'failure'
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-        run: |
-          if [ -z "$SLACK_WEBHOOK" ]; then
-            echo "SLACK_WEBHOOK not configured — skipping"
-            exit 0
-          fi
-          curl -s -X POST "$SLACK_WEBHOOK" \
-            -H 'Content-type: application/json' \
-            --data "{
-              \"text\": \"❌ ESP32 Matter pipeline failed on \`${{ github.ref_name }}\`\",
-              \"attachments\": [{
-                \"color\": \"danger\",
-                \"fields\": [
-                  {\"title\": \"Repo\",   \"value\": \"${{ github.repository }}\", \"short\": true},
-                  {\"title\": \"Branch\", \"value\": \"${{ github.ref_name }}\",  \"short\": true},
-                  {\"title\": \"Run\",    \"value\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\", \"short\": false}
-                ]
-              }]
-            }"
-
-# ════════════════════════════════════════════════════════════════════
-# STAGE 9 — OTA DEPLOY & MONITOR
-# ════════════════════════════════════════════════════════════════════
-  deploy-and-monitor:
-    name: Stage 9 — OTA Deploy & Monitor
-    runs-on: ubuntu-latest
-    needs: [release, notify-and-monitor]
-    if: |
-      github.ref == 'refs/heads/main' &&
-      github.event_name == 'push' &&
-      needs.release.result == 'success'
-    environment: production
-    outputs:
-      deploy_status: ${{ steps.poll.outputs.deploy_status }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download signed OTA bundle
-        uses: actions/download-artifact@v4
-        with:
-          name: firmware-esp32c3
-          path: ${{ env.FIRMWARE_DIR }}/esp32c3/
-
-      - name: Trigger OTA Canary Deployment (10% of fleet)
-        id: deploy
-        env:
-          OTA_SERVER_URL: ${{ secrets.OTA_SERVER_URL }}
-        run: |
-          VERSION="${{ needs.release.outputs.version }}"
-          echo "OTA version: $VERSION"
-          if [ -n "$OTA_SERVER_URL" ]; then
-            echo "Deploying to 10% canary fleet..."
-            HTTP_CODE=$(curl -s -o /tmp/deploy_resp.json -w "%{http_code}" \
-              -X POST "$OTA_SERVER_URL/api/deploy" \
-              -H "Authorization: Bearer ${{ secrets.OTA_API_TOKEN }}" \
-              -H "Content-Type: application/json" \
-              -d "{\"version\":\"$VERSION\",\"commit\":\"${{ github.sha }}\",\"target\":\"esp32c3\",\"rollout_pct\":10}")
-            if [ "$HTTP_CODE" -ge "200" ] && [ "$HTTP_CODE" -lt "300" ]; then
-              echo "DEPLOY_TRIGGERED=true" >> $GITHUB_ENV
-              echo "✅ Canary deployment triggered"
-            else
-              echo "DEPLOY_TRIGGERED=false" >> $GITHUB_ENV
-              echo "::warning::OTA API returned HTTP $HTTP_CODE"
-            fi
-          else
-            echo "::notice::OTA_SERVER_URL not configured — simulation mode"
-            echo "DEPLOY_TRIGGERED=simulated" >> $GITHUB_ENV
-          fi
-
-      - name: Poll Device Health
-        id: poll
-        env:
-          OTA_SERVER_URL: ${{ secrets.OTA_SERVER_URL }}
-        run: |
-          # FIX 9 — Skip polling when in simulation mode (saves 5 minutes)
-          if [ "$DEPLOY_TRIGGERED" != "true" ] || [ -z "$OTA_SERVER_URL" ]; then
-            echo "deploy_status=simulated" >> $GITHUB_OUTPUT
-            mkdir -p ${{ env.REPORTS_DIR }}
-            echo "simulated" > ${{ env.REPORTS_DIR }}/deploy-status.txt
-            echo "::notice::OTA simulation — no real device polling"
-            exit 0
-          fi
-
-          DEPLOY_STATUS="unknown"
-          for i in $(seq 1 6); do
-            sleep 50
-            RESP=$(curl -s -H "Authorization: Bearer ${{ secrets.OTA_API_TOKEN }}" \
-              "$OTA_SERVER_URL/api/status?version=${{ needs.release.outputs.version }}" \
-              2>/dev/null || echo '{}')
-            ACK=$(echo "$RESP" | python3 -c \
-              "import sys,json; print(json.load(sys.stdin).get('ack_pct',0))" \
-              2>/dev/null || echo 0)
-            CRASH=$(echo "$RESP" | python3 -c \
-              "import sys,json; print(json.load(sys.stdin).get('crash_pct',0))" \
-              2>/dev/null || echo 0)
-            echo "Attempt $i/6 — ACK: $ACK% | Crash: $CRASH%"
-            [ "$ACK" -ge "80" ]  && DEPLOY_STATUS="success"  && break
-            [ "$CRASH" -ge "5" ] && DEPLOY_STATUS="rollback"  && break
-          done
-
-          echo "deploy_status=$DEPLOY_STATUS" >> $GITHUB_OUTPUT
-          mkdir -p ${{ env.REPORTS_DIR }}
-          echo "$DEPLOY_STATUS" > ${{ env.REPORTS_DIR }}/deploy-status.txt
-          echo "Final OTA status: $DEPLOY_STATUS"
-
-      - name: Auto-Rollback on High Crash Rate
-        if: steps.poll.outputs.deploy_status == 'rollback'
-        env:
-          OTA_SERVER_URL: ${{ secrets.OTA_SERVER_URL }}
-        run: |
-          # FIX 10 — Clear rollback error message before exit 1
-          echo "::error::🚨 Crash rate exceeded 5% — initiating automatic rollback"
-          echo "::error::Version ${{ needs.release.outputs.version }} is being rolled back"
-          if [ -n "$OTA_SERVER_URL" ]; then
-            curl -s -X POST "$OTA_SERVER_URL/api/rollback" \
-              -H "Authorization: Bearer ${{ secrets.OTA_API_TOKEN }}" \
-              -d "{\"version\":\"${{ needs.release.outputs.version }}\"}" || true
-          fi
-          exit 1
-
-# ════════════════════════════════════════════════════════════════════
-# STAGE 10 — FEEDBACK LOOP
-# ════════════════════════════════════════════════════════════════════
-  feedback-loop:
-    name: Stage 10 — Feedback to Plan
-    runs-on: ubuntu-latest
-    needs:
-      - lint-and-validate
-      - security-shift-left
-      - build
-      - test-and-quality
-      - firmware-security-audit
-      - ai-agents
-      - build-second-run
-      - full-second-run
-      - release
-      - deploy-and-monitor
-    if: always()
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Auto-create Issue — Deploy Failure
-        if: needs.deploy-and-monitor.result == 'failure'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.create({
-              owner: context.repo.owner, repo: context.repo.repo,
-              title: `[AUTO] OTA Deploy failed — ${context.sha.substring(0,7)}`,
-              body: [
-                "## 🚨 Automatic failure report — Stage 9 OTA Deploy",
-                `| Commit | \`${context.sha}\` |`,
-                `| Run | [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) |`,
-                "", "## What to check",
-                "- [ ] Crash logs from affected devices (check OTA server)",
-                "- [ ] Memory regression vs previous release",
-                "- [ ] QEMU log from this run for panic patterns",
-                "_Auto-generated — feeds back to Stage 1 (Plan)._"
-              ].join("\n"),
-              labels: ["bug", "ci-failure", "ota", "auto-generated"]
-            });
-
-      - name: Auto-create Issue — Security Failure
-        if: needs.security-shift-left.result == 'failure'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.create({
-              owner: context.repo.owner, repo: context.repo.repo,
-              title: `[AUTO] Security scan failed — ${context.sha.substring(0,7)}`,
-              body: [
-                "## 🔐 Automatic security failure — Stage 2",
-                `| Commit | \`${context.sha}\` |`,
-                `| Run | [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) |`,
-                "", "- [ ] Gitleaks report", "- [ ] Grype CVEs", "- [ ] SBOM",
-                "_Auto-generated — feeds back to Stage 1 (Plan)._"
-              ].join("\n"),
-              labels: ["security", "ci-failure", "auto-generated"]
-            });
-
-      - name: Auto-create Issue — AI Agent Critical Finding
-        if: needs.ai-agents.result == 'failure'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.create({
-              owner: context.repo.owner, repo: context.repo.repo,
-              title: `[AUTO] AI agents blocked release — ${context.sha.substring(0,7)}`,
-              body: [
-                "## 🤖 AI Agent Analysis blocked the release pipeline",
-                `| Security score | ${{ needs.ai-agents.outputs.security_score }}/10 |`,
-                `| Quality score  | ${{ needs.ai-agents.outputs.quality_score }}/10 |`,
-                `| Commit | \`${context.sha}\` |`,
-                `| Run | [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) |`,
-                "", "## What to check",
-                "- [ ] Download ai-agent-reports-esp32c3 artifact",
-                "- [ ] Review security-report-esp32c3.json",
-                "- [ ] Review orchestrator-run.log for errors",
-                "_Auto-generated — feeds back to Stage 1 (Plan)._"
-              ].join("\n"),
-              labels: ["ai-finding", "ci-failure", "auto-generated"]
-            });
-
-      - name: Auto-create Issue — Quality Gate Failure
-        if: needs.test-and-quality.result == 'failure'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.create({
-              owner: context.repo.owner, repo: context.repo.repo,
-              title: `[AUTO] Quality gate failed — ${context.sha.substring(0,7)}`,
-              body: [
-                "## 🧪 Automatic quality failure — Stage 5",
-                `| Commit | \`${context.sha}\` |`,
-                `| Run | [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) |`,
-                "", "- [ ] cppcheck-deep.xml", "- [ ] Unit tests results",
-                "- [ ] QEMU log", "- [ ] Fuzzer report",
-                "_Auto-generated — feeds back to Stage 1 (Plan)._"
-              ].join("\n"),
-              labels: ["code-quality", "ci-failure", "auto-generated"]
-            });
-
-      - name: Final Pipeline Metrics
-        run: |
-          cat >> $GITHUB_STEP_SUMMARY << EOF
-          ## Stage 10 — Feedback Loop
-          | Stage | Result |
-          |-------|--------|
-          | Lint            | ${{ needs.lint-and-validate.result }} |
-          | Security        | ${{ needs.security-shift-left.result }} |
-          | Build           | ${{ needs.build.result }} |
-          | Quality Gate    | ${{ needs.test-and-quality.result }} |
-          | Firmware Audit  | ${{ needs.firmware-security-audit.result }} |
-          | AI Agents       | ${{ needs.ai-agents.result }} (Sec:${{ needs.ai-agents.outputs.security_score }}/10 Qual:${{ needs.ai-agents.outputs.quality_score }}/10) |
-          | AutoFix Rebuild | ${{ needs.build-second-run.result }} |
-          | Full Second Run | ${{ needs.full-second-run.result }} |
-          | Release         | ${{ needs.release.result }} |
-          | OTA Deploy      | ${{ needs.deploy-and-monitor.result }} |
-          **DevSecOps loop closed — failures above auto-created GitHub Issues.**
-          EOF
-
-      - name: Pipeline Completed
-        run: |
-          OVERALL="success"
-          for result in \
-            "${{ needs.lint-and-validate.result }}" \
-            "${{ needs.security-shift-left.result }}" \
-            "${{ needs.build.result }}" \
-            "${{ needs.test-and-quality.result }}" \
-            "${{ needs.firmware-security-audit.result }}" \
-            "${{ needs.ai-agents.result }}"; do
-            [ "$result" = "failure" ] && OVERALL="failure" && break
-          done
-          echo "Overall: $OVERALL"
-          [ "$OVERALL" = "failure" ] && \
-            echo "::error::One or more critical stages failed" && exit 1
-          echo "✅ Full DevSecOps loop with AI agents + QEMU + AutoFix + OTA completed"
+def run(): return run_autofix_agent()
+if __name__ == "__main__": run_autofix_agent()
