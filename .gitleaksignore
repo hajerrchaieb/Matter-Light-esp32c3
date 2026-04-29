@@ -1,0 +1,4 @@
+.env
+reports/
+.autofix-reports/
+tools/qemu_fault_runner.py
