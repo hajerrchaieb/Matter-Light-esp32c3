@@ -1133,16 +1133,27 @@ jobs:
 
       - name: Expose ESP-Matter source for agents
         run: |
-          mkdir -p esp-matter/examples/light/main
-          docker pull ${{ env.DOCKER_IMAGE }} 2>/dev/null || true
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            ${{ env.DOCKER_IMAGE }} \
-            /bin/bash -c "
-              cp -r /opt/espressif/esp-matter/examples/light/main/* \
-                /workspace/esp-matter/examples/light/main/ 2>/dev/null || true
-            "
-          ls esp-matter/examples/light/main/ 2>/dev/null || echo "No files copied"
+          # Only copy from Docker if esp-matter source is NOT already in the repo.
+          # After running workflow_dispatch reason=sync-esp-matter-source once,
+          # the source files are committed to the repo and don't need Docker anymore.
+          SOURCE_COUNT=$(find esp-matter/examples/light/main -name "*.cpp" -o -name "*.h" 2>/dev/null | wc -l || echo 0)
+          echo "ESP-Matter source files already in repo: $SOURCE_COUNT"
+          if [ "$SOURCE_COUNT" -gt "0" ]; then
+            echo "✅ Source already in repo — skipping Docker copy"
+            ls esp-matter/examples/light/main/
+          else
+            echo "Source not in repo — copying from Docker (run sync-esp-matter-source to persist)"
+            mkdir -p esp-matter/examples/light/main
+            docker pull ${{ env.DOCKER_IMAGE }} 2>/dev/null || true
+            docker run --rm \
+              -v ${{ github.workspace }}:/workspace \
+              ${{ env.DOCKER_IMAGE }} \
+              /bin/bash -c "
+                cp -r /opt/espressif/esp-matter/examples/light/main/* \
+                  /workspace/esp-matter/examples/light/main/ 2>/dev/null || true
+              "
+            ls esp-matter/examples/light/main/ 2>/dev/null || echo "No files copied"
+          fi
 
       # PATCH 3 — Updated pre-flight: no release_agent, add fault_injector check
       - name: Pre-flight check (agents + secrets + files)
@@ -1669,8 +1680,12 @@ jobs:
           SOURCE_FILES=$(ls esp-matter/examples/light/main/ 2>/dev/null | wc -l)
           echo "ESP-Matter source files in repo: $SOURCE_FILES"
           APPLIED=0; SKIPPED=0; TESTS_ADDED=false
-          if [ -d "$PATCH_DIR" ] && ls "$PATCH_DIR"/*.patch 2>/dev/null; then
-            for PATCH in "$PATCH_DIR"/*.patch; do
+          # FIX — use find instead of ls glob: ls *.patch exits 2 when empty (kills -e shell)
+          PATCH_COUNT=$(find "$PATCH_DIR" -name "*.patch" 2>/dev/null | wc -l || echo 0)
+          echo "Patches available: $PATCH_COUNT"
+          if [ -d "$PATCH_DIR" ] && [ "$PATCH_COUNT" -gt "0" ]; then
+            while IFS= read -r PATCH; do
+              [ -f "$PATCH" ] || continue
               NAME=$(basename "$PATCH")
               echo "→ $NAME"
               if git apply --check "$PATCH" 2>/dev/null; then
@@ -1691,7 +1706,7 @@ jobs:
                 echo "  Skipped"
                 SKIPPED=$((SKIPPED+1))
               fi
-            done
+            done < <(find "$PATCH_DIR" -name "*.patch" 2>/dev/null | sort)
           else
             echo "No patches in $PATCH_DIR"
           fi
