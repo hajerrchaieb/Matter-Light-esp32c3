@@ -1,6 +1,6 @@
 """
-agents/autofix_agent.py — Agent 8 : AutoFix Agent
-==================================================
+agents/autofix_agent.py — Agent 8 : AutoFix Agent — CORRECT VERSION
+====================================================================
 TWO-LEVEL FIX ENGINE:
   Level 1 — LLM (Groq): rewrites the full file
   Level 2 — Rule-based: deterministic, no LLM needed
