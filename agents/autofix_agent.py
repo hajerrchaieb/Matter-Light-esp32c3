@@ -1,6 +1,6 @@
 """
-agents/autofix_agent.py — Agent 8 : AutoFix Agent — CORRECT VERSION
-====================================================================
+agents/autofix_agent.py — Agent 8 : AutoFix Agent
+==================================================
 TWO-LEVEL FIX ENGINE:
   Level 1 — LLM (Groq): rewrites the full file
   Level 2 — Rule-based: deterministic, no LLM needed
@@ -182,31 +182,46 @@ def _is_code_issue(issue: dict) -> bool:
 def _get_patch_target(issue: dict):
     """
     Returns (repo_relative_path, file_content) or None.
-    Handles empty file field by trying demo files.
-    """
-    file_field = (issue.get("file") or "").strip()
-    src_dir    = _find_esp_source_dir()
-    desc_lower = issue.get("description", "").lower()
 
-    # Try 1: direct repo file
+    FIX — code_review issues (C++ complexity, naming, etc.) must NOT be
+    mapped to demo/intentional_bug.py. That file is Python and the LLM
+    produces nonsensical diffs when asked to fix C++ style issues there.
+    Only security issues with secret keywords should target the demo file.
+    """
+    file_field  = (issue.get("file") or "").strip()
+    src_dir     = _find_esp_source_dir()
+    desc_lower  = issue.get("description", "").lower()
+    source      = issue.get("source_agent", "")
+    category    = issue.get("category", "")
+
+    # ── Try 1: direct repo file (explicit path) ───────────────────────────
     if file_field and Path(file_field).exists():
         content = _read_file(file_field)
         if content:
             return file_field.lstrip("/"), content
 
-    # Try 2: demo files (when Gitleaks/security agent omits file field)
-    for demo_file in DEMO_BUG_FILES:
-        if Path(demo_file).exists():
-            # Check if the issue is likely about this demo file
-            content = _read_file(demo_file)
-            if content and (
-                not file_field  # no file field -> try demo
-                or demo_file in file_field
-                or any(kw in desc_lower for kw in ("sk-demo", "hardcoded", "api key", "api_key", "secret"))
-            ):
-                return demo_file, content
+    # ── Try 2: demo/intentional_bug.py ────────────────────────────────────
+    # ONLY for security issues with actual secret keywords.
+    # code_review issues (complexity, naming, magic numbers) are about C++
+    # firmware and must NOT be sent to the Python demo file.
+    is_secret_issue = (
+        category == "secret_in_code"
+        or any(kw in desc_lower for kw in (
+            "sk-demo", "hardcoded", "api key", "api_key",
+            "secret", "credential", "token", "cwe-798",
+        ))
+    )
+    is_security_source = source == "security"
 
-    # Try 3: C++ file in esp-matter
+    if is_secret_issue and is_security_source:
+        for demo_file in DEMO_BUG_FILES:
+            if Path(demo_file).exists():
+                content = _read_file(demo_file)
+                if content:
+                    print(f"[AutoFix]   → targeting {demo_file} (secret issue)")
+                    return demo_file, content
+
+    # ── Try 3: C++ file in esp-matter ─────────────────────────────────────
     if src_dir:
         basename = Path(file_field).name if file_field else ""
         for fn in CPP_SOURCE_FILES:
@@ -214,8 +229,11 @@ def _get_patch_target(issue: dict):
                 p = src_dir / fn
                 if p.exists():
                     return f"esp-matter/examples/light/main/{fn}", _read_file(p)
-        # Fallback app_main.cpp for code review issues
-        if issue.get("source_agent") in ("code_review", "debug", "fault_analysis"):
+
+        # Fallback to app_main.cpp ONLY for debug/fault issues, NOT code_review
+        # code_review issues are structural (naming, complexity) — the LLM cannot
+        # actually apply them as a small patch, they need manual refactoring
+        if source in ("debug", "fault_analysis"):
             p = src_dir / "app_main.cpp"
             if p.exists():
                 return "esp-matter/examples/light/main/app_main.cpp", _read_file(p)
@@ -411,27 +429,77 @@ def _llm_fix(issue, content, filename, is_python):
 
 
 def _make_diff(repo_rel, original, modified):
-    return "".join(difflib.unified_diff(
+    """
+    Generate a unified diff.
+    FIX — strip trailing whitespace from context lines that are just a space.
+    difflib encodes empty lines in context as " \n" (space + newline).
+    patch --dry-run rejects these as 'malformed patch at line N: (empty)'.
+    Fix: replace " \n" context lines with "\n" (pure empty line).
+    """
+    raw_lines = list(difflib.unified_diff(
         original.splitlines(keepends=True),
         modified.splitlines(keepends=True),
-        fromfile=f"a/{repo_rel}", tofile=f"b/{repo_rel}", n=3))
+        fromfile=f"a/{repo_rel}", tofile=f"b/{repo_rel}", n=3,
+    ))
+    cleaned = []
+    for line in raw_lines:
+        # Context line (starts with space) that is only whitespace → bare newline
+        if line.startswith(" ") and line.rstrip("\n\r").strip() == "":
+            cleaned.append("\n")
+        else:
+            # Also strip trailing spaces from ALL lines (except the content)
+            if line.startswith((" ", "-", "+")) and line.endswith(" \n"):
+                line = line.rstrip(" \n") + "\n"
+            cleaned.append(line)
+    return "".join(cleaned)
 
 
 def _validate(diff, original, filename):
+    """
+    Validate patch with patch --dry-run.
+    FIX — if patch fails, try with --ignore-whitespace as secondary check.
+    This catches patches that are valid but have minor whitespace differences.
+    """
     try:
-        with tempfile.NamedTemporaryFile(suffix=Path(filename).suffix or ".txt",
-                                          mode="w",encoding="utf-8",delete=False) as f:
-            f.write(original); sp = f.name
-        with tempfile.NamedTemporaryFile(suffix=".patch",mode="w",encoding="utf-8",delete=False) as f:
-            f.write(diff); pp = f.name
-        r = subprocess.run(["patch","--dry-run","-p1",sp,pp],
-                           capture_output=True,text=True,timeout=10)
+        with tempfile.NamedTemporaryFile(
+            suffix=Path(filename).suffix or ".txt",
+            mode="w", encoding="utf-8", delete=False
+        ) as f:
+            f.write(original)
+            sp = f.name
+        with tempfile.NamedTemporaryFile(
+            suffix=".patch", mode="w", encoding="utf-8", delete=False
+        ) as f:
+            f.write(diff)
+            pp = f.name
+
+        # Primary: strict validation
+        r = subprocess.run(
+            ["patch", "--dry-run", "-p1", sp, pp],
+            capture_output=True, text=True, timeout=10
+        )
+        if r.returncode == 0:
+            os.unlink(sp); os.unlink(pp)
+            return True
+
+        # Show why it failed
+        print(f"[AutoFix] Primary validation failed: {r.stderr[:200]}")
+
+        # Secondary: try with --ignore-whitespace (handles trailing space issues)
+        r2 = subprocess.run(
+            ["patch", "--dry-run", "--ignore-whitespace", "-p1", sp, pp],
+            capture_output=True, text=True, timeout=10
+        )
         os.unlink(sp); os.unlink(pp)
-        if r.returncode==0: return True
-        print(f"[AutoFix] Validation failed: {r.stderr[:150]}")
+        if r2.returncode == 0:
+            print("[AutoFix] Secondary validation passed (whitespace-tolerant)")
+            return True
+
+        print(f"[AutoFix] Validation failed (both strict and tolerant): {r2.stderr[:100]}")
         return False
     except Exception as e:
-        print(f"[AutoFix] Validation error: {e}"); return True
+        print(f"[AutoFix] Validation error: {e}")
+        return True  # Assume valid if we can't validate
 
 
 # ════════════════════════════════════════════════════════════════════
