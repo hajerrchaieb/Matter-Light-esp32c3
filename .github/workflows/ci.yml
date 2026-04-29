@@ -249,6 +249,9 @@ jobs:
           fi
 
       - name: Trivy — Scan Docker image for CVEs
+        # FIX — matter-light:v1 is ~3GB (ESP-IDF + Matter SDK)
+        # Default Trivy timeout is 5min → context deadline exceeded
+        # Added timeout: 600s (10min) + continue-on-error so pipeline never blocks
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.DOCKER_IMAGE }}
@@ -256,6 +259,8 @@ jobs:
           output: trivy-image.sarif
           severity: CRITICAL,HIGH
           exit-code: '0'
+          timeout: '600s'
+        continue-on-error: true
 
       - name: Upload Trivy SARIF to Security tab
         uses: github/codeql-action/upload-sarif@v4
@@ -1135,14 +1140,17 @@ jobs:
         run: |
           # Only copy from Docker if esp-matter source is NOT already in the repo.
           # After running workflow_dispatch reason=sync-esp-matter-source once,
-          # the source files are committed to the repo and don't need Docker anymore.
-          SOURCE_COUNT=$(find esp-matter/examples/light/main -name "*.cpp" -o -name "*.h" 2>/dev/null | wc -l || echo 0)
-          echo "ESP-Matter source files already in repo: $SOURCE_COUNT"
-          if [ "$SOURCE_COUNT" -gt "0" ]; then
-            echo "✅ Source already in repo — skipping Docker copy"
+          # the source files are committed and never need Docker again.
+          #
+          # FIX — check app_main.cpp directly (simpler and reliable)
+          # Previous find with -o flag had bash precedence issues
+          if [ -f "esp-matter/examples/light/main/app_main.cpp" ]; then
+            echo "✅ ESP-Matter source already in repo — skipping Docker copy"
+            echo "Files present:"
             ls esp-matter/examples/light/main/
           else
-            echo "Source not in repo — copying from Docker (run sync-esp-matter-source to persist)"
+            echo "⚠️  ESP-Matter source not in repo — copying from Docker"
+            echo "Tip: run workflow_dispatch reason=sync-esp-matter-source to persist permanently"
             mkdir -p esp-matter/examples/light/main
             docker pull ${{ env.DOCKER_IMAGE }} 2>/dev/null || true
             docker run --rm \
@@ -1152,7 +1160,8 @@ jobs:
                 cp -r /opt/espressif/esp-matter/examples/light/main/* \
                   /workspace/esp-matter/examples/light/main/ 2>/dev/null || true
               "
-            ls esp-matter/examples/light/main/ 2>/dev/null || echo "No files copied"
+            echo "Files copied:"
+            ls esp-matter/examples/light/main/ 2>/dev/null || echo "No files found"
           fi
 
       # PATCH 3 — Updated pre-flight: no release_agent, add fault_injector check
