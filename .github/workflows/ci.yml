@@ -58,6 +58,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y yamllint cppcheck flawfinder clang-format python3-pip
           pip3 install bandit
+
       - name: 🗂️ Validate Workflow YAML
         run: yamllint -d relaxed .github/workflows/ || true
 
@@ -82,6 +83,7 @@ jobs:
           else
             echo "✅ pre-commit config found"
           fi
+
       - name: 🎨 Clang-Format Check
         run: |
           if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
@@ -96,6 +98,7 @@ jobs:
           else
             echo "Source path not found: ${{ env.EXAMPLE_PATH }} — skipping"
           fi
+
       - name: 🔐 Python Security Scan (Bandit)
         run: |
           if find . -name "*.py" -not -path "./.git/*" | grep -q .; then
@@ -106,6 +109,7 @@ jobs:
             echo "No Python files found — skipping Bandit" \
               | tee ${{ env.REPORTS_DIR }}/bandit-report.json
           fi
+
       - name: 🔍 cppcheck Early Static Analysis
         run: |
           if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
@@ -121,6 +125,7 @@ jobs:
           else
             echo "Source path not found: ${{ env.EXAMPLE_PATH }}"
           fi
+
       - name: 📤 Upload lint reports
         uses: actions/upload-artifact@v4
         with:
@@ -148,6 +153,7 @@ jobs:
             | tar -xz
           sudo mv gitleaks /usr/local/bin/
           mkdir -p ${{ env.REPORTS_DIR }}
+
       - name: Secret Scan (Gitleaks)
         run: |
           if [ ! -f .gitleaksignore ]; then
@@ -177,6 +183,7 @@ jobs:
               echo "No secrets detected by Gitleaks"
             fi
           fi
+
       - name: Generate SBOM (SPDX-JSON)
         uses: anchore/sbom-action@v0
         with:
@@ -201,6 +208,7 @@ jobs:
             --file ${{ env.REPORTS_DIR }}/grype-report.json || true
           grype sbom:${{ env.REPORTS_DIR }}/sbom-spdx.json \
             --fail-on critical || true
+
       - name: Check Dependabot Config
         run: |
           if [ ! -f .github/dependabot.yml ]; then
@@ -208,6 +216,7 @@ jobs:
           else
             echo "Dependabot config found"
           fi
+
       - name: Upload security reports
         uses: actions/upload-artifact@v4
         with:
@@ -238,6 +247,7 @@ jobs:
           if [[ "${{ env.DOCKER_IMAGE }}" != *"@sha256:"* ]]; then
             echo "::warning::Docker image uses mutable tag — pin to @sha256 for supply chain security"
           fi
+
       - name: Trivy — Scan Docker image for CVEs
         uses: aquasecurity/trivy-action@master
         with:
@@ -271,6 +281,7 @@ jobs:
             "scan_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF
+
       - name: Upload container scan reports
         uses: actions/upload-artifact@v4
         with:
@@ -296,6 +307,7 @@ jobs:
           key: ccache-esp32c3-${{ github.sha }}
           restore-keys: |
             ccache-esp32c3-
+
       - name: Build ESP Matter Firmware (esp32c3)
         run: |
           mkdir -p ${{ env.FIRMWARE_DIR }}/esp32c3
@@ -330,6 +342,7 @@ jobs:
               cp build/*.map \
                 /workspace/${{ env.REPORTS_DIR }}/ 2>/dev/null || true
             "
+
       - name: Sign Firmware Binary (Secure Boot V2)
         run: |
           pip install esptool --quiet 2>/dev/null || true
@@ -348,6 +361,7 @@ jobs:
           else
             echo "::warning::FIRMWARE_SIGNING_KEY not configured — unsigned"
           fi
+
       - name: Write build manifest
         run: |
           cat > ${{ env.FIRMWARE_DIR }}/esp32c3/build-manifest.json << EOF
@@ -360,6 +374,7 @@ jobs:
             "builder": "github-actions"
           }
           EOF
+
       - name: Upload firmware (esp32c3)
         uses: actions/upload-artifact@v4
         with:
@@ -478,6 +493,7 @@ jobs:
             echo '{"status":"no_tests_yet","passed":0,"failed":0,"total":0}' \
               > ${{ env.REPORTS_DIR }}/unit-test-results.json
           fi
+
       # ── FAULT INJECTION (PATCH 1) ─────────────────────────────────
       - name: Run Fault Injection (QEMU simulation mode)
         run: |
@@ -487,8 +503,10 @@ jobs:
           from pathlib import Path
           sys.path.insert(0, ".")
           os.environ.setdefault("TARGET_CHIP", "${{ env.TARGET_CHIP }}")
+
           REPORTS = Path("${{ env.REPORTS_DIR }}")
           target  = "${{ env.TARGET_CHIP }}"
+
           try:
               # Try multiple import paths
               fi_mod = None
@@ -499,6 +517,7 @@ jobs:
                       break
                   except ImportError:
                       pass
+
               if fi_mod is None:
                   # Try file-based import
                   import importlib.util
@@ -509,14 +528,17 @@ jobs:
                           fi_mod = importlib.util.module_from_spec(spec)
                           spec.loader.exec_module(fi_mod)
                           break
+
               if fi_mod is None:
                   raise FileNotFoundError("fault_injector.py not found in tools/, ., or agents/")
+
               print(f"[Fault Injection] Running simulation mode for {target}...")
               report = fi_mod.run_fault_injection(target=target)
               total  = report.get("total_scenarios", 0)
               passed = report.get("passed", 0)
               status = report.get("overall_status", "unknown")
               print(f"[Fault Injection] {passed}/{total} scenarios passed | status={status}")
+
           except Exception as e:
               print(f"::warning::Fault injection error: {e}")
               # Write fallback report so fault_analysis_agent has something to read
@@ -531,6 +553,7 @@ jobs:
               )
               print("[Fault Injection] Fallback report written")
           PYEOF
+
       - name: Upload fault injection report
         uses: actions/upload-artifact@v4
         if: always()
@@ -566,6 +589,7 @@ jobs:
             echo "::warning::QEMU download failed — QEMU tests will be skipped"
             echo "QEMU_AVAILABLE=false" >> $GITHUB_ENV
           fi
+
       - name: Install esptool
         run: pip install esptool --quiet
 
@@ -575,18 +599,22 @@ jobs:
           FW_DIR="${{ env.FIRMWARE_DIR }}/esp32c3"
           echo "=== Firmware files ==="
           ls -la "$FW_DIR/" 2>/dev/null || echo "No firmware dir"
+
           BOOTLOADER=$(find "$FW_DIR" -name "bootloader.bin" | head -1)
           PARTITION=$(find "$FW_DIR" -name "partition-table.bin" | head -1)
           APP=$(find "$FW_DIR" -maxdepth 1 -name "light.bin" | head -1)
+
           if [ -z "$APP" ]; then
             APP=$(find "$FW_DIR" -maxdepth 1 -name "*.bin" \
               ! -name "bootloader.bin" \
               ! -name "partition-table.bin" \
               ! -name "*-signed.bin" | head -1)
           fi
+
           echo "Bootloader : ${BOOTLOADER:-NOT FOUND}"
           echo "Partition  : ${PARTITION:-NOT FOUND}"
           echo "App binary : ${APP:-NOT FOUND}"
+
           # FIX 2 — Better error handling + use flasher_args if available
           if [ -z "$BOOTLOADER" ] || [ -z "$PARTITION" ] || [ -z "$APP" ]; then
             echo "::warning::One or more firmware binaries missing — QEMU will be skipped"
@@ -657,6 +685,7 @@ jobs:
           "
             fi
           fi
+
       - name: Run firmware in QEMU
         # FIX 5 — continue-on-error so Stage AI always runs
         if: env.QEMU_SKIP != 'true' && env.QEMU_AVAILABLE != 'false'
@@ -666,6 +695,7 @@ jobs:
           mkdir -p ${{ env.REPORTS_DIR }}
           echo "======== QEMU SESSION START ========" \
             > ${{ env.REPORTS_DIR }}/qemu-run.log
+
           # FIX 3 — Increased timeout: 60s for Matter boot sequence
           # FIX 4 — Use -serial mon:stdio for clean UART capture
           timeout 60 qemu-system-riscv32 \
@@ -674,9 +704,11 @@ jobs:
             -drive file="$FW_DIR/flash_image.bin",if=mtd,format=raw \
             -serial mon:stdio \
             2>&1 | tee -a ${{ env.REPORTS_DIR }}/qemu-run.log || true
+
           echo "======== QEMU SESSION END ========" \
             >> ${{ env.REPORTS_DIR }}/qemu-run.log
           echo "QEMU log size: $(wc -l < ${{ env.REPORTS_DIR }}/qemu-run.log) lines"
+
       - name: Parse QEMU UART log
         if: env.QEMU_SKIP != 'true' && env.QEMU_AVAILABLE != 'false'
         continue-on-error: true
@@ -736,6 +768,7 @@ jobs:
           OUTFILE.write_text(json.dumps(findings, indent=2))
           print(findings["summary"])
           PYEOF
+
       - name: QEMU Quality Gate
         # FIX 5 — continue-on-error: QEMU failures should NOT block Stage AI
         if: env.QEMU_SKIP != 'true' && env.QEMU_AVAILABLE != 'false'
@@ -767,6 +800,7 @@ jobs:
           else:
             print(f"::warning::QEMU status={status} — pipeline continues, AutoFix will handle")
           PYEOF
+
       # ── STATIC ANALYSIS ───────────────────────────────────────────
       - name: cppcheck Deep Static Analysis
         run: |
@@ -783,6 +817,7 @@ jobs:
             flawfinder --minlevel=2 --html ${{ env.EXAMPLE_PATH }} \
               > ${{ env.REPORTS_DIR }}/flawfinder-deep.html || true
           fi
+
       - name: Quality Gate — Enforce cppcheck
         run: |
           if [ -f ${{ env.REPORTS_DIR }}/cppcheck-deep.xml ]; then
@@ -798,11 +833,13 @@ jobs:
             echo "::warning::cppcheck report not found — source path missing in runner"
             echo "Quality gate: SKIPPED"
           fi
+
       # ── FUZZING ──────────────────────────────────────────────────
       - name: Install clang + fuzzing tools
         run: |
           sudo apt-get install -y clang llvm -qq
           clang --version
+
       - name: Prepare fuzzing workspace
         run: |
           mkdir -p fuzz/crashes fuzz/corpus ${{ env.REPORTS_DIR }}
@@ -813,6 +850,7 @@ jobs:
           print('Auto seed corpus created')
           "
           fi
+
       - name: Compile fuzzing harness
         run: |
           clang++ -std=c++17 -g -O1 \
@@ -826,6 +864,7 @@ jobs:
             echo "::error::Fuzzer compilation failed"
             exit 1
           fi
+
       - name: Run libFuzzer (90 second window)
         run: |
           echo "======== FUZZER SESSION START ========" \
@@ -838,12 +877,14 @@ jobs:
             2>&1 | tee -a ${{ env.REPORTS_DIR }}/fuzz-raw.log || true
           echo "======== FUZZER SESSION END ========" \
             >> ${{ env.REPORTS_DIR }}/fuzz-raw.log
+
       - name: Parse fuzzer results
         run: |
           python3 fuzz/parse_fuzz_results.py \
             ${{ env.REPORTS_DIR }}/fuzz-raw.log \
             fuzz/crashes \
             ${{ env.REPORTS_DIR }}/fuzz-report-esp32c3.json
+
       - name: Fuzzer quality gate
         run: |
           python3 << 'PYEOF'
@@ -860,6 +901,7 @@ jobs:
             sys.exit(1)
           print(f"✅ Fuzzer gate passed — 0 crashes in {r.get('executions',0):,} executions")
           PYEOF
+
       - name: Upload test & quality reports
         uses: actions/upload-artifact@v4
         if: always()
@@ -899,6 +941,7 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           pip install esptool pyelftools
+
       - name: Binary Security Properties Check
         run: |
           mkdir -p ${{ env.REPORTS_DIR }}
@@ -914,6 +957,7 @@ jobs:
             json.dump(report, f, indent=2)
           print(f"Audited {len(findings)} binary(ies)")
           PYEOF
+
       - name: ESP Binary Header Validation
         run: |
           for bin in ${{ env.FIRMWARE_DIR }}/esp32c3/*.bin; do
@@ -921,6 +965,7 @@ jobs:
             echo "--- $bin ---"
             python3 -m esptool image_info "$bin" 2>/dev/null || true
           done
+
       - name: Compute firmware hashes for SLSA
         run: |
           mkdir -p ${{ env.REPORTS_DIR }}
@@ -931,6 +976,7 @@ jobs:
             echo "$H $NAME" >> ${{ env.REPORTS_DIR }}/firmware-sha256.txt
             echo "SHA256($NAME) = $H"
           done
+
       - name: License Compliance Gate
         run: |
           UNLICENSED=$(find ${{ env.EXAMPLE_PATH }} \
@@ -944,6 +990,7 @@ jobs:
           else
             echo "License compliance passed"
           fi
+
       - name: Upload firmware audit reports
         uses: actions/upload-artifact@v4
         with:
@@ -988,6 +1035,7 @@ jobs:
             echo '{"runs":[],"run_count":0}' > ${{ env.REPORTS_DIR }}/run-history.json
             echo "First run — baseline history created"
           fi
+
       - name: Download lint reports (Stage 1)
         uses: actions/download-artifact@v4
         with:
@@ -1063,11 +1111,13 @@ jobs:
               echo "  ⚠️  MISSING: $f"
             fi
           done
+
       - name: Install AI agent dependencies
         run: |
           python3 -m pip install --upgrade pip
           pip install langchain langchain-core langchain-groq langgraph \
             chromadb python-dotenv pydantic
+
       - name: Configure agent environment
         run: |
           printf 'GROQ_API_KEY=%s\n' "${{ secrets.GROQ_API_KEY1 }}" > .env
@@ -1080,6 +1130,7 @@ jobs:
             echo "::error::GROQ_API_KEY is empty — add it in Settings > Secrets > Actions"
             exit 1
           fi
+
       - name: Expose ESP-Matter source for agents
         run: |
           mkdir -p esp-matter/examples/light/main
@@ -1092,6 +1143,7 @@ jobs:
                 /workspace/esp-matter/examples/light/main/ 2>/dev/null || true
             "
           ls esp-matter/examples/light/main/ 2>/dev/null || echo "No files copied"
+
       # PATCH 3 — Updated pre-flight: no release_agent, add fault_injector check
       - name: Pre-flight check (agents + secrets + files)
         env:
@@ -1133,6 +1185,7 @@ jobs:
             exit 1
           fi
           echo "=== Pre-flight passed ==="
+
       - name: Run AI Agents Orchestrator
         id: run_agents
         env:
@@ -1144,6 +1197,7 @@ jobs:
             --target esp32c3 \
             --version "v${{ github.run_number }}" \
             2>&1 | tee ${{ env.REPORTS_DIR }}/orchestrator-run.log
+
           if [ -f ${{ env.REPORTS_DIR }}/pipeline-summary.json ]; then
             PASSED=$(python3 -c "
           import json
@@ -1174,10 +1228,12 @@ jobs:
           echo "quality_score=$QUA"     >> $GITHUB_OUTPUT
           echo "patches_count=$PATCHES" >> $GITHUB_OUTPUT
           echo "Result: passed=$PASSED | sec=$SEC/10 | quality=$QUA/10 | patches=$PATCHES"
+
           if [ "$SEC" = "N/A" ] || [ "$QUA" = "N/A" ]; then
             echo "::warning::Scores N/A — showing orchestrator log tail"
             tail -60 ${{ env.REPORTS_DIR }}/orchestrator-run.log 2>/dev/null || true
           fi
+
       - name: Regression Detection
         if: always()
         run: |
@@ -1205,6 +1261,7 @@ jobs:
           except Exception as e:
             print(f"::warning::Regression detection error: {e}")
           PYEOF
+
       - name: Post AI Summary to GitHub Step Summary
         if: always()
         run: |
@@ -1237,6 +1294,7 @@ jobs:
           print("\n".join(lines))
           PYEOF
           fi
+
       # PATCH 2 — Rich PR comment with patches, tests, fault injection details
       - name: Post Rich AI Results as PR Comment
         if: github.event_name == 'pull_request' && always()
@@ -1246,10 +1304,13 @@ jobs:
           script: |
             const fs   = require('fs');
             const rdir = process.env.REPORTS_DIR;
+
             // Try to read the rich PR comment generated by orchestrator node_summary
             const commentFile = `${rdir}/pr-comment-body.md`;
             const summaryFile = `${rdir}/pipeline-summary.json`;
+
             let body = "";
+
             if (fs.existsSync(commentFile)) {
               body = fs.readFileSync(commentFile, 'utf8')
                 .replace('${GITHUB_SERVER_URL}',  context.serverUrl)
@@ -1265,8 +1326,10 @@ jobs:
               const af = sr.autofix         || {};
               const ts = sr.tests           || {};
               const fi = sr.fault_injection || {};
+
               body = `## 🤖 AI Agent Analysis Report\n\n`;
               body += `**Target:** \`esp32c3\` | **Overall:** ${s.pipeline_passed ? '✅ PASSED' : '⚠️ ISSUES DETECTED'}\n\n`;
+
               body += `### 📊 Agent Scores\n\n`;
               body += `| Agent | Result | Details |\n|-------|--------|----------|\n`;
               body += `| 🔍 Code Review | \`${cr.score ?? 'N/A'}/10\` | ESP-Matter C++ static analysis |\n`;
@@ -1274,6 +1337,7 @@ jobs:
               body += `| 🔨 Build       | \`${bk.status ?? '?'}\` | ESP-IDF idf.py build esp32c3 |\n`;
               body += `| 💾 Memory      | Flash \`${mm.flash_pct ?? '?'}%\` | ESP32-C3 4MB flash |\n`;
               body += `| ⚡ Fault Inj.  | \`${fi.passed ?? 0}/${fi.total ?? 0}\` scenarios | status: \`${fi.status ?? 'not_run'}\` |\n\n`;
+
               body += `### 🔧 AutoFix Patches\n\n`;
               const patches = af.patch_files || [];
               if (patches.length > 0) {
@@ -1284,31 +1348,37 @@ jobs:
               } else {
                 body += `> ✅ No patches needed this run.\n\n`;
               }
+
               body += `### 🧪 Test Results\n\n`;
               body += `| Metric | Value |\n|--------|-------|\n`;
               body += `| Tests generated | ${ts.generated ?? 0} Unity test(s) |\n`;
               body += `| Tests executed  | ${ts.passed ?? 0}/${ts.executed ?? 0} passed |\n`;
               body += `| Test status     | \`${ts.status ?? 'unknown'}\` |\n\n`;
+
               body += `### ⚡ Fault Injection (QEMU+GDB simulation)\n\n`;
               body += `| Metric | Value |\n|--------|-------|\n`;
               body += `| Scenarios run  | ${fi.total ?? 0} |\n`;
               body += `| Scenarios passed | ${fi.passed ?? 0} |\n`;
               body += `| Robustness score | \`${fi.robustness_score ?? 'N/A'}/10\` |\n`;
               body += `| Dynamic score  | \`${fi.dynamic_score ?? 0}/10\` |\n\n`;
+
               body += `---\n*Generated by AI agents — Groq \`llama-3.3-70b-versatile\` — `;
               body += `[View pipeline](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*`;
             } else {
               body = "## 🤖 AI Agent Analysis\n\nReport not available — check pipeline logs.";
             }
+
             // Update existing bot comment or create new one
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo:  context.repo.repo,
               issue_number: context.issue.number,
             });
+
             const botComment = comments.find(c =>
               c.user.type === 'Bot' && c.body.includes('AI Agent Analysis Report')
             );
+
             if (botComment) {
               await github.rest.issues.updateComment({
                 owner:      context.repo.owner,
@@ -1326,6 +1396,7 @@ jobs:
               });
               console.log('Created new PR comment');
             }
+
       - name: Upload orchestrator log
         uses: actions/upload-artifact@v4
         if: always()
@@ -1405,6 +1476,7 @@ jobs:
           except Exception as e:
             print(f'Non disponible: {e}')
           " 2>/dev/null || true
+
       - name: Cache ccache
         uses: actions/cache@v4
         with:
@@ -1475,6 +1547,7 @@ jobs:
           APPLIED=$(grep -oP 'applied=\K[0-9]+' \
             ${{ env.REPORTS_DIR }}/build-patched-esp32c3.log 2>/dev/null | tail -1 || echo "0")
           echo "patches_applied=$APPLIED" >> $GITHUB_OUTPUT
+
       - name: Check rebuild result
         id: rebuild
         run: |
@@ -1486,6 +1559,7 @@ jobs:
             echo "::warning::Rebuild with patches had issues — Stage 4c continues anyway"
             echo "build_status=success" >> $GITHUB_OUTPUT
           fi
+
       - name: Upload patched firmware + logs
         uses: actions/upload-artifact@v4
         if: always()
@@ -1530,6 +1604,7 @@ jobs:
               echo 'Files copied:'; ls \"\$DEST\"
             "
           ls -la esp-matter/examples/light/main/
+
       - name: Create .gitignore and README
         run: |
           cat > esp-matter/.gitignore << 'GITEOF'
@@ -1543,6 +1618,7 @@ jobs:
           Copied from `hajerrchaieb/matter-light:v1` for AutoFix Agent patches.
           DO NOT EDIT MANUALLY — managed by DevSecOps pipeline.
           READEOF
+
       - name: Commit and push ESP-Matter source
         run: |
           git config user.name  "DevSecOps Bot"
@@ -1554,9 +1630,11 @@ jobs:
             exit 0
           fi
           git commit -m "feat: add ESP-Matter light source for AutoFix patches
+
           Source: ${{ env.DOCKER_IMAGE }}
           Files: esp-matter/examples/light/main/"
           git push origin ${{ github.ref_name }}
+
 # ════════════════════════════════════════════════════════════════════
 # STAGE 4c — FULL SECOND RUN (push autofix branch + open PR)
 # ════════════════════════════════════════════════════════════════════
@@ -1632,6 +1710,7 @@ jobs:
           echo "applied=$APPLIED skipped=$SKIPPED tests=$TESTS_ADDED"
           echo "applied=$APPLIED"         >> $GITHUB_OUTPUT
           echo "tests_added=$TESTS_ADDED" >> $GITHUB_OUTPUT
+
       - name: Créer branche autofix et pusher
         id: push_branch
         if: steps.apply_local.outputs.applied != '0' || steps.apply_local.outputs.tests_added == 'true'
@@ -1647,22 +1726,42 @@ jobs:
              2>/dev/null || true
           git add -A
           STAGED=$(git status --porcelain 2>/dev/null | wc -l)
+          echo "Staged changes: $STAGED"
           if [ "$STAGED" -eq "0" ]; then
-            echo "::warning::Nothing to commit"
+            echo "::warning::Nothing to commit — all changes already in code"
             echo "pushed=false" >> $GITHUB_OUTPUT
             exit 0
           fi
-          PATCH_COUNT=$(ls ${{ env.REPORTS_DIR }}/patches/*.patch 2>/dev/null | wc -l)
-          PATCH_NAMES=$(ls ${{ env.REPORTS_DIR }}/patches/*.patch 2>/dev/null \
-            | xargs -I{} basename {} | tr '\n' ' ' || echo "none")
-          printf 'fix(autofix): apply %s AI patch(es) from run #%s\n\nPatches: %s\nTarget: esp32c3\nRun: %s\n' \
-            "$PATCH_COUNT" "${{ github.run_id }}" "$PATCH_NAMES" \
-            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            > /tmp/commit_msg.txt
+          # FIX — use find instead of ls glob to avoid exit code 2 when no patches
+          # ls reports/patches/*.patch fails with -e (errexit) when dir is empty
+          PATCH_DIR="${{ env.REPORTS_DIR }}/patches"
+          PATCH_COUNT=$(find "$PATCH_DIR" -name "*.patch" 2>/dev/null | wc -l || echo 0)
+          PATCH_NAMES=$(find "$PATCH_DIR" -name "*.patch" 2>/dev/null \
+            -exec basename {} \; | tr '\n' ' ' || echo "none")
+          # Write commit message to file (avoids special char issues in printf)
+          cat > /tmp/commit_msg.txt << MSGEOF
+          fix(autofix): apply ${PATCH_COUNT} AI patch(es) from run #${{ github.run_id }}
+
+          Patches: ${PATCH_NAMES}
+          Target: esp32c3
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MSGEOF
+          echo "=== Commit message ==="
+          cat /tmp/commit_msg.txt
           git commit -F /tmp/commit_msg.txt
-          git push origin "$BRANCH" || git push --force-with-lease origin "$BRANCH"
+          # FIX — push with clear fallback, never exit 2
+          if git push origin "$BRANCH" 2>&1; then
+            echo "✅ Pushed: $BRANCH"
+          elif git push --force-with-lease origin "$BRANCH" 2>&1; then
+            echo "✅ Force-pushed: $BRANCH"
+          else
+            echo "::error::git push failed for branch $BRANCH"
+            echo "pushed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
           echo "pushed=true"    >> $GITHUB_OUTPUT
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+
       - name: Créer la Pull Request automatique
         if: steps.push_branch.outputs.pushed == 'true'
         uses: actions/github-script@v7
@@ -1682,18 +1781,22 @@ jobs:
                 `| ${p.file?.split('/').pop() ?? '?'} | ${(p.severity??'?').toUpperCase()} | \`${p.fix_method??'?'}\` | ${p.description?.substring(0,60)??''} |`
               );
             } catch(e) {}
+
             let s = {}; let sr = {};
             try {
               s  = JSON.parse(fs.readFileSync(`${process.env.REPORTS_DIR}/pipeline-summary.json`, 'utf8'));
               sr = s.stage_results || {};
             } catch(e) {}
+
             const sc  = sr.security        || {};
             const cod = sr.code_quality    || {};
             const ts  = sr.tests           || {};
             const fi  = sr.fault_injection || {};
+
             const patchTable = patchList.length > 0
               ? `| File | Severity | Method | Description |\n|------|----------|--------|-------------|\n${patchList.join('\n')}`
               : '_No patches applied_';
+
             let pr;
             try {
               pr = await github.rest.pulls.create({
@@ -1754,6 +1857,7 @@ jobs:
                 labels: ["autofix", "ai-generated", "needs-review"]
               });
             } catch(e) { console.log(`Label note: ${e.message}`); }
+
       - name: Stage 4c Summary
         if: always()
         run: |
@@ -1769,6 +1873,7 @@ jobs:
           | Pipeline déclenché | ${PUSHED:-false} |
           | PR créée | Voir onglet Pull Requests |
           EOF
+
 # ════════════════════════════════════════════════════════════════════
 # STAGE 7 — RELEASE
 # ════════════════════════════════════════════════════════════════════
@@ -1840,6 +1945,7 @@ jobs:
               echo "- Initial release" >> CHANGELOG_LATEST.md
             fi
           fi
+
       - name: Compute Release Version
         id: version
         run: |
@@ -1855,6 +1961,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=firmware-$VERSION-${{ github.sha }}" >> $GITHUB_OUTPUT
           echo "Release version: $VERSION"
+
       - name: Package OTA Update Bundle
         run: |
           mkdir -p ota-bundle
@@ -1881,6 +1988,7 @@ jobs:
           print(json.dumps(manifest, indent=2))
           PYEOF
           tar -czf ota-bundle-${{ steps.version.outputs.version }}.tar.gz ota-bundle/
+
       - name: Read Firmware Size
         id: size
         run: |
@@ -1889,6 +1997,7 @@ jobs:
           echo "size_info<<EOF" >> $GITHUB_OUTPUT
           echo "$SIZE_INFO"    >> $GITHUB_OUTPUT
           echo "EOF"           >> $GITHUB_OUTPUT
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -1971,6 +2080,7 @@ jobs:
           **Branch:** \`${{ github.ref_name }}\`
           **Triggered by:** \`${{ github.event_name }}\`
           EOF
+
       - name: Notify Slack on Failure
         if: |
           needs.build.result == 'failure' ||
@@ -1997,6 +2107,7 @@ jobs:
                 ]
               }]
             }"
+
 # ════════════════════════════════════════════════════════════════════
 # STAGE 9 — OTA DEPLOY & MONITOR
 # ════════════════════════════════════════════════════════════════════
@@ -2047,6 +2158,7 @@ jobs:
             echo "::notice::OTA_SERVER_URL not configured — simulation mode"
             echo "DEPLOY_TRIGGERED=simulated" >> $GITHUB_ENV
           fi
+
       - name: Poll Device Health
         id: poll
         env:
@@ -2060,6 +2172,7 @@ jobs:
             echo "::notice::OTA simulation — no real device polling"
             exit 0
           fi
+
           DEPLOY_STATUS="unknown"
           for i in $(seq 1 6); do
             sleep 50
@@ -2076,10 +2189,12 @@ jobs:
             [ "$ACK" -ge "80" ]  && DEPLOY_STATUS="success"  && break
             [ "$CRASH" -ge "5" ] && DEPLOY_STATUS="rollback"  && break
           done
+
           echo "deploy_status=$DEPLOY_STATUS" >> $GITHUB_OUTPUT
           mkdir -p ${{ env.REPORTS_DIR }}
           echo "$DEPLOY_STATUS" > ${{ env.REPORTS_DIR }}/deploy-status.txt
           echo "Final OTA status: $DEPLOY_STATUS"
+
       - name: Auto-Rollback on High Crash Rate
         if: steps.poll.outputs.deploy_status == 'rollback'
         env:
@@ -2094,6 +2209,7 @@ jobs:
               -d "{\"version\":\"${{ needs.release.outputs.version }}\"}" || true
           fi
           exit 1
+
 # ════════════════════════════════════════════════════════════════════
 # STAGE 10 — FEEDBACK LOOP
 # ════════════════════════════════════════════════════════════════════
@@ -2137,6 +2253,7 @@ jobs:
               ].join("\n"),
               labels: ["bug", "ci-failure", "ota", "auto-generated"]
             });
+
       - name: Auto-create Issue — Security Failure
         if: needs.security-shift-left.result == 'failure'
         uses: actions/github-script@v7
@@ -2154,6 +2271,7 @@ jobs:
               ].join("\n"),
               labels: ["security", "ci-failure", "auto-generated"]
             });
+
       - name: Auto-create Issue — AI Agent Critical Finding
         if: needs.ai-agents.result == 'failure'
         uses: actions/github-script@v7
@@ -2176,6 +2294,7 @@ jobs:
               ].join("\n"),
               labels: ["ai-finding", "ci-failure", "auto-generated"]
             });
+
       - name: Auto-create Issue — Quality Gate Failure
         if: needs.test-and-quality.result == 'failure'
         uses: actions/github-script@v7
@@ -2194,6 +2313,7 @@ jobs:
               ].join("\n"),
               labels: ["code-quality", "ci-failure", "auto-generated"]
             });
+
       - name: Final Pipeline Metrics
         run: |
           cat >> $GITHUB_STEP_SUMMARY << EOF
@@ -2212,6 +2332,7 @@ jobs:
           | OTA Deploy      | ${{ needs.deploy-and-monitor.result }} |
           **DevSecOps loop closed — failures above auto-created GitHub Issues.**
           EOF
+
       - name: Pipeline Completed
         run: |
           OVERALL="success"
