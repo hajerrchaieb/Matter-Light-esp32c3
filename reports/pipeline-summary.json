@@ -1,0 +1,53 @@
+{
+  "target": "esp32c3",
+  "version": "v17",
+  "pipeline_passed": true,
+  "errors_found": true,
+  "second_run_ready": true,
+  "stage_results": {
+    "code_quality": {
+      "score": 4,
+      "issues": 0
+    },
+    "security": {
+      "score": 3,
+      "cves": 0,
+      "secrets": 2
+    },
+    "build": {
+      "status": "success"
+    },
+    "memory": {
+      "flash_pct": 43.9
+    },
+    "tests": {
+      "generated": 5,
+      "deployed": true,
+      "executed": 0,
+      "passed": 0,
+      "failed": 0,
+      "status": "no_tests_yet"
+    },
+    "fault_injection": {
+      "total": 10,
+      "passed": 9,
+      "status": "critical_fail",
+      "robustness_score": 7,
+      "dynamic_score": 4
+    },
+    "autofix": {
+      "patches_generated": 3,
+      "patch_files": [
+        "autofix-esp32c3-01-security-demo_intentional_bug.py.patch",
+        "autofix-esp32c3-02-security-tools_qemu_fault_runner.py.patch",
+        "autofix-esp32c3-06-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch"
+      ],
+      "issues_analyzed": 6,
+      "status": "patches_generated"
+    },
+    "release": {
+      "version": "v17",
+      "canary_deploy": "simulated"
+    }
+  }
+}
