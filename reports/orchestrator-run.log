@@ -1,0 +1,186 @@
+
+============================================================
+NODE: Code Review Agent
+
+=======================================================
+🔵 CODE REVIEW AGENT — Stage 1
+📁 Source : ../esp-matter/examples/light/main
+🎯 Target : esp32c3
+=======================================================
+  📁 Source found at: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main
+
+📖 Reading source files...
+  ✅ Read: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main/app_main.cpp (11481 chars)
+  ✅ Read: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main/app_driver.cpp (7561 chars)
+  ✅ Read: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main/app_priv.h (3375 chars)
+
+⚡ Reviewing code with Groq...
+
+📋 CODE REVIEW RESULT:
+-------------------------------------------------------
+### CODE QUALITY ISSUES
+
+1. **Complexity**: The code has multiple responsibilities, including Matter protocol handling, LED driver management, and commissioning flow. It would be beneficial to separate these concerns into different modules or classes.
+2. **Naming**: Some variable and function names are not descriptive, such as `app_driver_light_set_power` or `val`. Using more descriptive names would improve code readability.
+3. **Structure**: The code lacks a clear structure, with multiple functions and variables defined in a single file. Organizing the code into separate files or modules would improve maintainability.
+4. **Comments**: The code lacks comments, making it difficult to understand the purpose and behavior of each function or variable. Adding comments would improve code readability and maintainability.
+5. **Magic numbers**: The code uses magic numbers, such as `254` or `360`, without explanation. Defining these numbers as constants with descriptive names would improve code readability.
+
+### SECURITY ISSUES
+
+1. **Unsafe functions**: The code uses `strcpy` and `strcat` functions, which are known to be unsafe. Using safer alternatives, such as `strlcpy` or `strlcat`, would prevent buffer overflow vulnerabilities.
+2. **Buffer risks**: The code uses fixed-size buffers, such as `cd_start` and `cd_end`, without checking their sizes. Using dynamic buffers or checking buffer sizes would prevent buffer overflow vulnerabilities.
+3. **Memory leaks**: The code does not check for memory allocation failures, which could lead to memory leaks. Using `esp_err_t` checks and freeing allocated memory would prevent memory leaks.
+4. **Hardcoded values**: The code uses hardcoded values, such as `DEFAULT_POWER` or `DEFAULT_BRIGHTNESS`, without explanation. Defining these values as constants with descriptive names would improve code readability.
+
+### ESP32 BEST PRACTICES VIOLATIONS
+
+1. **Task stack sizes**: The code does not specify task stack sizes, which could lead to stack overflow errors. Using `xTaskCreate` with a specified stack size would prevent stack overflow errors.
+2. **Heap usage**: The code does not check heap usage, which could lead to memory allocation failures. Using `heap_caps_get_free_size` and `heap_caps_check` would prevent memory allocation failures.
+3. **ISR safety**: The code does not use ISR-safe functions, which could lead to data corruption or crashes. Using ISR-safe functions, such as `xQueueSendFromISR`, would prevent data corruption or crashes.
+4. **Error handling**: The code does not check `esp_err_t` return values, which could lead to unexpected behavior or crashes. Using `esp_err_t` checks and handling errors would prevent unexpected behavior or crashes.
+5. **NVS usage**: The code does not check NVS usage, which could lead to data corruption or crashes. Using `nvs_get` and `nvs_set` with error checking would prevent data corruption or crashes.
+
+### ESP-MATTER SPECIFIC ISSUES
+
+1. **Attribute handling**: The code does not handle attribute errors, which could lead to unexpected behavior or crashes. Using `esp_matter_attr_val_t` checks and handling attribute errors would prevent unexpected behavior or crashes.
+2. **Cluster configuration**: The code does not configure clusters correctly, which could lead to unexpected behavior or crashes. Using `esp_matter_cluster_t` checks and configuring clusters correctly would prevent unexpected behavior or crashes.
+3. **Commissioning flow**: The code does not handle commissioning flow errors, which could lead to unexpected behavior or crashes. Using `esp_matter_commissioning_t` checks and handling commissioning flow errors would prevent unexpected behavior or crashes.
+
+### SUGGESTED IMPROVEMENTS
+
+1. **Separate concerns**: Separate the code into different modules or classes, each responsible for a specific concern, such as Matter protocol handling or LED driver management.
+2. **Use descriptive names**: Use descriptive variable and function names to improve code readability.
+3. **Add comments**: Add comments to explain the purpose and behavior of each function or variable.
+4. **Use safer functions**: Use safer functions, such as `strlcpy` or `strlcat`, to prevent buffer overflow vulnerabilities.
+5. **Check buffer sizes**: Check buffer sizes to prevent buffer overflow vulnerabilities.
+6. **Use dynamic buffers**: Use dynamic buffers to prevent buffer overflow vulnerabilities.
+7. **Check memory allocation failures**: Check memory allocation failures to prevent memory leaks.
+8. **Free allocated memory**: Free allocated memory to prevent memory leaks.
+9. **Use ISR-safe functions**: Use ISR-safe functions to prevent data corruption or crashes.
+10. **Check `esp_err_t` return values**: Check `esp_err_t` return values to prevent unexpected behavior or crashes.
+
+### QUALITY SCORE
+
+I would give the code a quality score of 4 out of 10. The code has several quality issues, including complexity, naming, structure, and comment issues. Additionally, the code has security issues, such as unsafe functions and buffer risks, and ESP32 best practices violations, such as task stack size and heap usage issues. However, the code is well-organized, and the use of `esp_matter` and `esp_idf` libraries is correct. With improvements in code quality, security, and ESP32 best practices, the code could achieve a higher quality score. 
+
+Here is an example of how the `app_driver_light_set_power` function could be improved:
+```cpp
+static esp_err_t app_driver_light_set_power(led_driver_handle_t handle, esp_matter_attr_val_t *val)
+{
+    // Check if the value is valid
+    if (val->val.b < 0 || val->val.b > 1) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Set the power using the LED driver
+    return led_driver_set_power(handle, val->val.b);
+}
+```
+This improved function checks the validity of the input value and returns an error if it is invalid. It also uses a more descriptive name and adds comments to explain the purpose of the function.
+-------------------------------------------------------
+
+✅ Report saved: reports/code-review-esp32c3.json
+
+============================================================
+NODE: Security Agent
+
+[Security Agent] Starting analysis for target: esp32c3
+[Security Agent] Calling Groq LLM...
+[Security Agent] Report saved: reports/security-report-esp32c3.json
+[Security Agent] Done — score=0/10 | CVEs=0 | secrets=5
+
+============================================================
+NODE: Debug Agent
+
+[Debug Agent] Starting analysis for target: esp32c3
+[Debug Agent] Build log truncated to last 6000 chars
+[Debug Agent] Calling Groq LLM...
+[Debug Agent] Report saved: reports/debug-report-esp32c3.json
+[Debug Agent] Done — health=degraded, errors=0
+
+============================================================
+NODE: Fault Analysis Agent
+
+[Fault Analysis Agent] Starting for esp32c3
+[Fault Analysis Agent] Done — score=7/10
+[Fault Analysis Agent] Report: reports/fault-analysis-report-esp32c3.json
+[Orchestrator] Dynamic=4/10 (QEMU=False Fuzz=True FI=False)
+
+============================================================
+NODE: Test Generation Agent
+
+[Test Gen Agent] Starting for target: esp32c3
+[Test Gen Agent] Calling Groq LLM...
+[Test Gen Agent] JSON parsed successfully
+[Test Gen Agent] C++ test file saved: reports/generated_tests_esp32c3.cpp (1730 chars)
+[Test Gen Agent] Mock saved: mock_led_driver.h
+[Test Gen Agent] Mock saved: mock_gpio.h
+[Test Gen Agent] Deploying test file to ESP-Matter test dir...
+[Test Gen Agent] Deploy status: deployed
+  → /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/test/test_light_app_esp32c3.cpp
+  → /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/test/CMakeLists.txt
+  → /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/test/main/CMakeLists.txt
+  → /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/test/mock_led_driver.h
+  → /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/test/mock_gpio.h
+[Test Gen Agent] Done — 4 test cases, 1 regression tests
+[Test Gen Agent] Report: reports/testgen-report-esp32c3.json
+[Orchestrator] 4 test cases | deploy=deployed
+
+============================================================
+NODE: Optimization + Release Agent (merged)
+
+[Optimization Agent] Starting for target: esp32c3
+[Optimization Agent] Calling Groq LLM for memory analysis...
+[Optimization Agent] Generating release changelog...
+[Optimization Agent] Done — flash=43.9% | saving=95KB | changelog saved
+
+============================================================
+NODE: AutoFix Agent
+
+[AutoFix] ===== target:esp32c3 LLM:True =====
+[AutoFix] ESP source dir: esp-matter/examples/light/main
+[AutoFix] Collecté: 9 issues (5 security, 3 code_review, 0 debug, 1 fault)
+[AutoFix] Total issues: 9
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #1: [CRITICAL] Hardcoded API key detected. Rule: . Match: . Action: ro
+          fichier: demo/intentional_bug.py
+          → ⚠️  patch potentiellement invalide (sauvegardé quand même)
+          → SAUVEGARDÉ: autofix-esp32c3-01-security-demo_intentional_bug.py.patch [llm]
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #2: demo/intentional_bug.py déjà patché → skip doublon
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #3: demo/intentional_bug.py déjà patché → skip doublon
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #4: demo/intentional_bug.py déjà patché → skip doublon
+[AutoFix] #5: [CRITICAL] Hardcoded API key detected. Rule: . Match: . Action: ro
+          fichier: tools/qemu_fault_runner.py
+          → ⚠️  patch potentiellement invalide (sauvegardé quand même)
+          → SAUVEGARDÉ: autofix-esp32c3-05-security-tools_qemu_fault_runner.py.patch [llm]
+[AutoFix] #6: pas de fichier cible → manual
+[AutoFix] #7: pas de fichier cible → manual
+[AutoFix] #8: pas de fichier cible → manual
+[AutoFix] #9: [MEDIUM] inadequate stack size or improper use of recursive func
+          fichier: esp-matter/examples/light/main/app_main.cpp
+          → ⚠️  patch potentiellement invalide (sauvegardé quand même)
+          → SAUVEGARDÉ: autofix-esp32c3-09-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch [llm]
+
+[AutoFix] patches=3 | manual=3
+[AutoFix] Rapport: reports/autofix-report-esp32c3.json
+[Orchestrator] AutoFix: 3 patch(es)
+
+============================================================
+NODE: Pipeline Summary
+
+╔══════════════════════════════════════════╗
+║ Code Review : 4/10
+║ Security    : 0/10  CVEs=0  Secrets=5
+║ Build       : success
+║ Tests       : gen=4  run=0/0  no_tests_yet
+║ Fault Inject: 9/10  critical_fail
+║ Memory      : Flash 43.9%
+║ Robustness  : 7/10  Dynamic=4/10
+║ AutoFix     : 3 patch(es)
+║ Overall     : PASSED ✅
+╚══════════════════════════════════════════╝
+[Orchestrator] pipeline-summary.json + pr-comment-body.md saved

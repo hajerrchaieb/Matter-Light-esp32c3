@@ -1,0 +1,64 @@
+{
+  "target": "esp32c3",
+  "security_score": 0,
+  "score_justification": "started at 10, deducted 9 for secrets (5 secrets * -3 points, capped at -9), deducted 1 for mutable Docker tag, resulting in a score of 0",
+  "critical_cves": [],
+  "secrets_found": [
+    {
+      "type": "API key",
+      "file": "reports/patches/autofix-esp32c3-02-security-tools_qemu_fault_runner.py.patch",
+      "risk": "critical",
+      "action": "rotate exposed API key immediately"
+    },
+    {
+      "type": "API key",
+      "file": "reports/patches/autofix-esp32c3-02-security-demo_intentional_bug.py.patch",
+      "risk": "critical",
+      "action": "rotate exposed API key immediately"
+    },
+    {
+      "type": "API key",
+      "file": "reports/patches/autofix-esp32c3-03-security-tools_qemu_fault_runner.py.patch",
+      "risk": "critical",
+      "action": "rotate exposed API key immediately"
+    },
+    {
+      "type": "API key",
+      "file": "reports/patches/fix_tools_qemu_fault_runner.py.patch",
+      "risk": "critical",
+      "action": "rotate exposed API key immediately"
+    },
+    {
+      "type": "API key",
+      "file": "tools/qemu_fault_runner.py",
+      "risk": "critical",
+      "action": "rotate exposed API key immediately"
+    }
+  ],
+  "container_security": {
+    "image": "hajerrchaieb/matter-light:v1",
+    "digest_pinned": false,
+    "mutable_tag_risk": true,
+    "recommendation": "pin image to digest: hajerrchaieb/matter-light@sha256:4fc2c8771424bcd1824f5aa5328e8b060aa3d062c960c0b1714597864faafdd7"
+  },
+  "slsa_provenance": {
+    "hashes_available": true,
+    "binary_count": 4,
+    "integrity_status": "verified",
+    "recommendation": "store hashes in GitHub Attestations for SLSA L2"
+  },
+  "supply_chain_risks": [
+    {
+      "component": "hajerrchaieb/matter-light Docker image",
+      "risk": "mutable tag allows for potential supply chain attacks",
+      "mitigation": "pin image to digest"
+    }
+  ],
+  "prioritised_actions": [
+    "1. [CRITICAL] Rotate exposed API key immediately \u2014 found in multiple files",
+    "2. [HIGH] Pin Docker image to digest to prevent supply chain attacks",
+    "3. [LOW] Add SLSA L2 attestation to release workflow"
+  ],
+  "compliance_notes": "SBOM compliance observations: CycloneDX and SPDX formats not explicitly mentioned, but SBOM summary provided",
+  "summary": "The esp32c3 target has a security score of 0 due to exposed API keys and a mutable Docker tag. Immediate action is required to rotate the API keys and pin the Docker image to prevent supply chain attacks."
+}
