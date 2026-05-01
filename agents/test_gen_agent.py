@@ -464,9 +464,14 @@ Respond with exactly this JSON (escape ALL newlines in code as \\n):
 
     REPORTS.mkdir(exist_ok=True)
 
-    # ── Fallback: if LLM returned placeholder, generate real tests ──
+    # ── Fallback: ALWAYS generate tests if LLM returned nothing useful ──
     cpp_check = report.get("test_file_content", "")
-    if "test_placeholder" in cpp_check and "TEST_PASS()" in cpp_check:
+    n_test_cases = len(report.get("test_cases", []))
+    # Trigger fallback if: placeholder, empty content, or 0 test cases
+    if (not cpp_check
+        or len(cpp_check) < 100
+        or n_test_cases == 0
+        or ("test_placeholder" in cpp_check and "TEST_PASS()" in cpp_check)):
         print("[Test Gen Agent] LLM returned placeholder — generating real tests locally")
         real_cpp = (
             '#include <unity.h>\n'
@@ -513,6 +518,18 @@ Respond with exactly this JSON (escape ALL newlines in code as \\n):
         )
         report["test_file_content"] = real_cpp
         report["fallback_used"] = True
+        # FIX — fallback must also populate test_cases so orchestrator shows correct count
+        if not report.get("test_cases"):
+            report["test_cases"] = [
+                {"name": "test_on_off_attribute_update", "type": "unit",
+                 "area": "on_off", "description": "Verifies on/off attribute update returns ESP_OK"},
+                {"name": "test_null_val_rejected", "type": "robustness",
+                 "area": "null_safety", "description": "NULL val pointer returns ESP_ERR_INVALID_ARG"},
+                {"name": "test_invalid_type_rejected", "type": "robustness",
+                 "area": "validation", "description": "INVALID attribute type returns error"},
+                {"name": "test_brightness_boundary", "type": "unit",
+                 "area": "level_control", "description": "Brightness 254 accepted correctly"},
+            ]
         print(f"[Test Gen Agent] Real tests generated locally ({len(real_cpp)} chars)")
 
     # ── Save JSON report ──────────────────────────────────────────
