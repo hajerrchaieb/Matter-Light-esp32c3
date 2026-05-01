@@ -482,9 +482,10 @@ def run_autofix_agent(target: str = TARGET, apply_patches: bool = False) -> dict
     all_issues = _collect_issues(reports)
     print(f"[AutoFix] Total issues: {len(all_issues)}")
 
-    file_cache   = {}   # évite de lire plusieurs fois le même fichier
-    patches_done = []
-    manual_only  = []
+    file_cache    = {}   # évite de lire plusieurs fois le même fichier
+    patched_files = set()  # FIX: dédupliquer — 1 seul patch par fichier cible
+    patches_done  = []
+    manual_only   = []
 
     for idx, issue in enumerate(all_issues, 1):
         info = _get_patch_target(issue)
@@ -494,6 +495,13 @@ def run_autofix_agent(target: str = TARGET, apply_patches: bool = False) -> dict
             continue
 
         repo_rel, original = info
+
+        # FIX — dédupliquer: 1 seul patch par fichier cible
+        # Si 2 issues security pointent vers demo/intentional_bug.py
+        # → on garde seulement le premier patch (le second serait un conflit)
+        if repo_rel in patched_files:
+            print(f"[AutoFix] #{idx}: {repo_rel} déjà patché → skip doublon")
+            continue
         current  = file_cache.get(repo_rel, original)
         is_py    = repo_rel.endswith(".py")
         basename = Path(repo_rel).name
@@ -546,6 +554,7 @@ def run_autofix_agent(target: str = TARGET, apply_patches: bool = False) -> dict
             "fix_method":   method,
             "valid":        is_valid,
         })
+        patched_files.add(repo_rel)  # FIX — marquer ce fichier comme patché
         print(f"          → SAUVEGARDÉ: {pname} [{method}]")
 
     # Générer APPLY_ALL.sh

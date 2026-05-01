@@ -387,7 +387,7 @@ Respond with exactly this JSON (escape ALL newlines in code as \\n):
   "target": "{target}",
   "test_file_name": "test_light_app_{target}.cpp",
   "existing_coverage": "none",
-  "test_file_content": "#include <unity.h>\\n#include \\"mock_idf.h\\"\\n\\nvoid setUp(void) {{}}\\nvoid tearDown(void) {{}}\\n\\n/* Test 1: on/off cluster — normal operation */\\nvoid test_on_off_cluster_toggle(void) {{\\n    esp_matter_attr_val_t val;\\n    val.type = ESP_MATTER_VAL_TYPE_BOOLEAN;\\n    val.val.b = true;\\n    esp_err_t ret = app_driver_attribute_update(NULL, 1, 0x0006, &val);\\n    TEST_ASSERT_EQUAL(ESP_OK, ret);\\n}}\\n\\n/* Test 2: NULL endpoint — robustness */\\nvoid test_null_endpoint_handled(void) {{\\n    esp_err_t ret = app_driver_attribute_update(NULL, 0, 0x0006, NULL);\\n    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ret);\\n}}\\n\\n/* Test 3: invalid attribute type — boundary check */\\nvoid test_invalid_attribute_type(void) {{\\n    esp_matter_attr_val_t val;\\n    val.type = ESP_MATTER_VAL_TYPE_INVALID;\\n    esp_err_t ret = app_driver_attribute_update(NULL, 1, 0x0006, &val);\\n    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ret);\\n}}\\n\\nvoid app_main(void) {{\\n    UNITY_BEGIN();\\n    RUN_TEST(test_on_off_cluster_toggle);\\n    RUN_TEST(test_null_endpoint_handled);\\n    RUN_TEST(test_invalid_attribute_type);\\n    UNITY_END();\\n}}",
+  "test_file_content": "#include <unity.h>\\n#include \\"mock_idf.h\\"\\n\\n/* cppcheck-suppress unusedFunction */\\nvoid setUp(void) {{ /* Required by Unity framework */ }}\\n/* cppcheck-suppress unusedFunction */\\nvoid tearDown(void) {{ /* Required by Unity framework */ }}\\n\\n/* Test 1: on/off cluster — normal operation */\\nvoid test_on_off_cluster_toggle(void) {{\\n    esp_matter_attr_val_t val;\\n    val.type = ESP_MATTER_VAL_TYPE_BOOLEAN;\\n    val.val.b = true;\\n    esp_err_t ret = app_driver_attribute_update(NULL, 1, 0x0006, &val);\\n    TEST_ASSERT_EQUAL(ESP_OK, ret);\\n}}\\n\\n/* Test 2: NULL endpoint — robustness */\\nvoid test_null_endpoint_handled(void) {{\\n    esp_err_t ret = app_driver_attribute_update(NULL, 0, 0x0006, NULL);\\n    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ret);\\n}}\\n\\n/* Test 3: invalid attribute type — boundary check */\\nvoid test_invalid_attribute_type(void) {{\\n    esp_matter_attr_val_t val;\\n    val.type = ESP_MATTER_VAL_TYPE_INVALID;\\n    esp_err_t ret = app_driver_attribute_update(NULL, 1, 0x0006, &val);\\n    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ret);\\n}}\\n\\nvoid app_main(void) {{\\n    UNITY_BEGIN();\\n    RUN_TEST(test_on_off_cluster_toggle);\\n    RUN_TEST(test_null_endpoint_handled);\\n    RUN_TEST(test_invalid_attribute_type);\\n    UNITY_END();\\n}}",
   "mock_files": [
     {{"filename": "mock_led_driver.h", "content": "/* mock content \\\\n */"}},
     {{"filename": "mock_gpio.h",       "content": "/* mock content \\\\n */"}}
@@ -471,8 +471,9 @@ Respond with exactly this JSON (escape ALL newlines in code as \\n):
         real_cpp = (
             '#include <unity.h>\n'
             '#include "mock_idf.h"\n\n'
-            'void setUp(void) {}\n'
-            'void tearDown(void) {}\n\n'
+            'void setUp(void) { /* Required by Unity framework — no per-test setup needed */ }\n'
+            '/* cppcheck-suppress unusedFunction */\n'
+            'void tearDown(void) { /* Required by Unity framework — no per-test teardown needed */ }\n\n'
             '/* Test: on/off attribute update */\n'
             'void test_on_off_attribute_update(void) {\n'
             '    esp_matter_attr_val_t val;\n'
