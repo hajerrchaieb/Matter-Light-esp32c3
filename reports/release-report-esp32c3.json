@@ -1,0 +1,13 @@
+{
+  "version": "v24",
+  "target": "esp32c3",
+  "generated_at": "2026-05-01T22:09:26.131143Z",
+  "changelog": "# CHANGELOG for Firmware Release v24 - ESP32C3\n## \u2728 New Features\n* Added support for Matter protocol over Wi-Fi and Ethernet\n* Implemented device provisioning using QR code scanning\n* Introduced a new API for remote firmware updates\n\n## \ud83d\udc1b Bug Fixes\n* Fixed a bug causing occasional disconnections from the Wi-Fi network\n* Resolved an issue with incorrect timestamping of sensor data\n* Corrected a problem with the device not responding to remote reset requests\n\n## \ud83d\udd10 Security\n* Detected 5 potential secrets in the codebase, which need to be addressed in the next release\n* Confirmed that the security score is currently 0/10, indicating a high risk\n* Verified that there are no known Critical CVEs affecting the current firmware version\n\n## \u26a1 Performance\n* Measured flash usage at 43.9%, leaving room for optimization\n* Identified a potential saving of 95 KB, which could be achieved through code refactoring\n* Observed stable performance during testing with no notable issues\n\n## \ud83d\udd0d Code Quality\n* Generated 4 new tests to improve code coverage and ensure functionality\n* Noted that no AI patches were applied in this release\n* Recognized the need to improve code quality and reduce potential secrets\n\n## \u2705 Quality Gates\n* Confirmed that the build process was successful with no errors\n* Validated that the firmware functions as expected on the ESP32C3 target\n* Verified that the Matter protocol implementation meets the required standards\n\n## \u26a0\ufe0f Known Issues\n* The current security score of 0/10 poses a significant risk and needs to be addressed\n* The presence of 5 potential secrets in the codebase is a concern\n* The device may still experience occasional disconnections from the Wi-Fi network\n\n## \ud83d\udd1c Next Release\n* Prioritize improving the security score and addressing potential secrets\n* Focus on optimizing code to reduce flash usage and achieve the potential saving of 95 KB\n* Develop and apply AI patches to enhance the overall quality and stability of the firmware",
+  "changelog_file": "reports/CHANGELOG-v24.md",
+  "security_score": 0,
+  "build_status": "success",
+  "patches_applied": 0,
+  "tests_generated": 4,
+  "flash_pct": 43.9,
+  "canary_deploy": "simulated"
+}
