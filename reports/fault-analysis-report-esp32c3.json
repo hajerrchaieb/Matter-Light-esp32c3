@@ -1,0 +1,77 @@
+{
+  "target": "esp32c3",
+  "robustness_score": 7,
+  "score_justification": "The score of 7 is justified because the system handled most of the fault injection scenarios, but had a critical failure in the stack_overflow_trigger scenario, which resulted in a crash instead of a controlled reboot. Additionally, the system had some high-severity failures, but no full crashes. The score is not higher because of the critical failure and the need for improvement in the memory family.",
+  "failed_scenarios_analysis": [
+    {
+      "scenario": "stack_overflow_trigger",
+      "family": "memory",
+      "cwe": "CWE-121",
+      "root_cause": "lack of stack overflow protection",
+      "fix_code": "Implement stack overflow protection using stack canaries or other mechanisms",
+      "effort": "medium"
+    }
+  ],
+  "passed_scenarios_highlights": [
+    {
+      "scenario": "nvs_magic_corruption",
+      "why_good": "correctly calls nvs_flash_erase()"
+    },
+    {
+      "scenario": "nvs_write_interrupted",
+      "why_good": "correctly handles interrupted writes"
+    },
+    {
+      "scenario": "matter_onoff_invalid_value",
+      "why_good": "correctly handles invalid values"
+    }
+  ],
+  "family_assessments": {
+    "memory": {
+      "score": 6,
+      "verdict": "NEEDS_IMPROVEMENT",
+      "top_recommendation": "Implement stack overflow protection and improve memory management"
+    },
+    "nvs": {
+      "score": 8,
+      "verdict": "GOOD",
+      "top_recommendation": "Continue to use secure NVS practices"
+    },
+    "matter": {
+      "score": 7,
+      "verdict": "ACCEPTABLE",
+      "top_recommendation": "Improve error handling and input validation"
+    }
+  },
+  "priority_fixes": [
+    "1. [CRITICAL] Implement stack overflow protection to prevent crashes",
+    "2. [HIGH] Improve memory management to prevent memory-related issues",
+    "3. [MEDIUM] Improve error handling and input validation in the Matter protocol"
+  ],
+  "overall_verdict": "NEEDS_IMPROVEMENT",
+  "summary": "The system has some critical failures and areas for improvement, particularly in the memory family. However, it also has some strengths, such as good NVS practices and acceptable Matter protocol implementation. With some priority fixes and improvements, the system can become more robust and reliable.",
+  "fault_runner_summary": {
+    "total": 10,
+    "passed": 9,
+    "failed": 1,
+    "status": "critical_fail",
+    "by_family": {
+      "memory": {
+        "total": 4,
+        "passed": 3,
+        "failed": 1
+      },
+      "nvs": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      },
+      "matter": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      }
+    }
+  },
+  "analysis_timestamp": "2026-05-01T09:04:29.255874"
+}

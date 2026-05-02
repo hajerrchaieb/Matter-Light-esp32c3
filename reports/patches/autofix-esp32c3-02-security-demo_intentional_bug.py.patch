@@ -1,0 +1,19 @@
+--- a/demo/intentional_bug.py
++++ b/demo/intentional_bug.py
+@@ -1,6 +1,6 @@
+ import os
+
+-DEMO_API_KEY = os.environ.get('DEMO_API_KEY', '')
++DEMO_API_KEY = os.environ.get('DEMO_API_KEY', '1234567890abcdef')
+
+ def compute_ratio(a, b):
+     return a / b
+@@ -10,7 +10,7 @@
+     return result.strip() if result else ''
+
+ if __name__ == "__main__":
+-    key = DEMO_API_KEY
++    key = os.environ.get('DEMO_API_KEY', '')
+     try:
+         ratio = compute_ratio(10, 0)
+     except ZeroDivisionError:
