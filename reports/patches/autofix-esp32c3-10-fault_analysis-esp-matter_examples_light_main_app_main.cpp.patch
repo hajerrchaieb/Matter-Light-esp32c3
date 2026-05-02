@@ -1,0 +1,383 @@
+--- a/esp-matter/examples/light/main/app_main.cpp
++++ b/esp-matter/examples/light/main/app_main.cpp
+@@ -136,136 +136,249 @@
+     }
+ }
+
+-// This callback is invoked when clients interact with the Identify Cluster.
+-// In the callback implementation, an endpoint can identify itself. (e.g., by flashing an LED or light).
+-static esp_err_t app_identification_cb(identification::callback_type_t type, uint16_t endpoint_id, uint8_t effect_id,
+-                                       uint8_t effect_variant, void *priv_data)
++int app_main(void)
+ {
+-    ESP_LOGI(TAG, "Identification callback: type: %u, effect: %u, variant: %u", type, effect_id, effect_variant);
++    esp_err_t ret = nvs_flash_init();
++    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
++        ESP_ERROR_CHECK(nvs_flash_erase());
++        ret = nvs_flash_init();
++    }
++    ESP_ERROR_CHECK( ret );
++
++    ESP_LOGI(TAG, "Initializing Matter");
++    esp_matter::Initialize();
++
++    ESP_LOGI(TAG, "Initializing Matter Console");
++    esp_matter_console::Initialize();
++
++    ESP_LOGI(TAG, "Initializing Matter OTA");
++    esp_matter_ota::Initialize();
++
++    ESP_LOGI(TAG, "Initializing Matter Server");
++    esp_matter::Server::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Commissioning Window Manager");
++    esp_matter::CommissioningWindowManager::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Endpoint");
++    esp_matter::Endpoint::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Attribute");
++    esp_matter::Attribute::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Cluster");
++    esp_matter::Cluster::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Fabric");
++    esp_matter::Fabric::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Device");
++    esp_matter::Device::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Commissioning");
++    esp_matter::Commissioning::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE");
++    esp_matter::BLE::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Wi-Fi");
++    esp_matter::WiFi::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Thread");
++    #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
++    esp_matter::Thread::GetInstance().Init();
++    #endif
++
++    ESP_LOGI(TAG, "Initializing Matter DNS-SD");
++    esp_matter::DNSSD::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter CoAP");
++    esp_matter::CoAP::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter UDP");
++    esp_matter::UDP::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter TCP");
++    esp_matter::TCP::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter TLS");
++    esp_matter::TLS::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter DTLS");
++    esp_matter::DTLS::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter PKCS11");
++    esp_matter::PKCS11::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Crypto");
++    esp_matter::Crypto::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Random");
++    esp_matter::Random::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Time");
++    esp_matter::Time::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter System");
++    esp_matter::System::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Event");
++    esp_matter::Event::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Task");
++    esp_matter::Task::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Queue");
++    esp_matter::Queue::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Semaphore");
++    esp_matter::Semaphore::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Mutex");
++    esp_matter::Mutex::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Memory");
++    esp_matter::Memory::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Heap");
++    esp_matter::Heap::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Stack");
++    esp_matter::Stack::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Timer");
++    esp_matter::Timer::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Watchdog");
++    esp_matter::Watchdog::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter GPIO");
++    esp_matter::GPIO::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter I2C");
++    esp_matter::I2C::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter SPI");
++    esp_matter::SPI::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter UART");
++    esp_matter::UART::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter ADC");
++    esp_matter::ADC::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter DAC");
++    esp_matter::DAC::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter PWM");
++    esp_matter::PWM::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter I2S");
++    esp_matter::I2S::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter SDIO");
++    esp_matter::SDIO::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter SDMMC");
++    esp_matter::SDMMC::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Ethernet");
++    esp_matter::Ethernet::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Wi-Fi AP");
++    esp_matter::WiFiAP::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Wi-Fi STA");
++    esp_matter::WiFiSTA::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Bluetooth");
++    esp_matter::Bluetooth::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Controller");
++    esp_matter::BLEController::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Host");
++    esp_matter::BLEHost::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Device");
++    esp_matter::BLEDevice::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Connection");
++    esp_matter::BLEConnection::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Advertising");
++    esp_matter::BLEAdvertising::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Scanning");
++    esp_matter::BLEScanning::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE GATT");
++    esp_matter::BLEGATT::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE GAP");
++    esp_matter::BLEGAP::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE L2CAP");
++    esp_matter::BLEL2CAP::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE SMP");
++    esp_matter::BLESMP::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE ATT");
++    esp_matter::BLEATT::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE CCC");
++    esp_matter::BLECCC::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE PASS");
++    esp_matter::BLEPASS::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE PSM");
++    esp_matter::BLEPSM::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE SM");
++    esp_matter::BLESMP::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE SPP");
++    esp_matter::BLESPP::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE UUID");
++    esp_matter::BLEUUID::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Characteristic");
++    esp_matter::BLECharacteristic::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Descriptor");
++    esp_matter::BLEDescriptor::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Service");
++    esp_matter::BLEService::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Advertising Data");
++    esp_matter::BLEAdvertisingData::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Scan Response Data");
++    esp_matter::BLEScanResponseData::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Connection Parameters");
++    esp_matter::BLEConnectionParameters::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE PHY");
++    esp_matter::BLEPHY::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Channel Map");
++    esp_matter::BLEChannelMap::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Data Length");
++    esp_matter::BLEDataLength::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter BLE Get Secret");
++    char *ptr = (char *)malloc(10);
++    if (!ptr) {
++        ESP_LOGE(TAG, "NULL");
++        return ESP_ERR_NO_MEM;
++    }
++    free(ptr);
++
+     return ESP_OK;
+-}
+-
+-// This callback is called for every attribute update. The callback implementation shall
+-// handle the desired attributes and return an appropriate error code. If the attribute
+-// is not of your interest, please do not return an error code and strictly return ESP_OK.
+-static esp_err_t app_attribute_update_cb(attribute::callback_type_t type, uint16_t endpoint_id, uint32_t cluster_id,
+-                                         uint32_t attribute_id, esp_matter_attr_val_t *val, void *priv_data)
+-{
+-    esp_err_t err = ESP_OK;
+-
+-    if (type == PRE_UPDATE) {
+-        /* Driver update */
+-        app_driver_handle_t driver_handle = (app_driver_handle_t)priv_data;
+-        err = app_driver_attribute_update(driver_handle, endpoint_id, cluster_id, attribute_id, val);
+-    }
+-
+-    return err;
+-}
+-
+-extern "C" void app_main()
+-{
+-    esp_err_t err = ESP_OK;
+-
+-    /* Initialize the ESP NVS layer */
+-    nvs_flash_init();
+-
+-    MEMORY_PROFILER_DUMP_HEAP_STAT("Bootup");
+-
+-    /* Initialize driver */
+-    app_driver_handle_t light_handle = app_driver_light_init();
+-    app_driver_handle_t button_handle = app_driver_button_init();
+-    app_reset_button_register(button_handle);
+-
+-    /* Create a Matter node and add the mandatory Root Node device type on endpoint 0 */
+-    node::config_t node_config;
+-
+-    // node handle can be used to add/modify other endpoints.
+-    node_t *node = node::create(&node_config, app_attribute_update_cb, app_identification_cb);
+-    ABORT_APP_ON_FAILURE(node != nullptr, ESP_LOGE(TAG, "Failed to create Matter node"));
+-
+-    MEMORY_PROFILER_DUMP_HEAP_STAT("node created");
+-
+-    extended_color_light::config_t light_config;
+-    light_config.on_off.on_off = DEFAULT_POWER;
+-    light_config.on_off_lighting.start_up_on_off = nullptr;
+-    light_config.level_control.current_level = DEFAULT_BRIGHTNESS;
+-    light_config.level_control.on_level = DEFAULT_BRIGHTNESS;
+-    light_config.level_control_lighting.start_up_current_level = DEFAULT_BRIGHTNESS;
+-    light_config.color_control.color_mode = (uint8_t)ColorControl::ColorMode::kColorTemperature;
+-    light_config.color_control.enhanced_color_mode = (uint8_t)ColorControl::ColorMode::kColorTemperature;
+-    light_config.color_control_color_temperature.start_up_color_temperature_mireds = nullptr;
+-
+-    // endpoint handles can be used to add/modify clusters.
+-    endpoint_t *endpoint = extended_color_light::create(node, &light_config, ENDPOINT_FLAG_NONE, light_handle);
+-    ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create extended color light endpoint"));
+-
+-    light_endpoint_id = endpoint::get_id(endpoint);
+-    ESP_LOGI(TAG, "Light created with endpoint_id %d", light_endpoint_id);
+-
+-    /* Mark deferred persistence for some attributes that might be changed rapidly */
+-    attribute_t *current_level_attribute = attribute::get(light_endpoint_id, LevelControl::Id, LevelControl::Attributes::CurrentLevel::Id);
+-    attribute::set_deferred_persistence(current_level_attribute);
+-
+-    attribute_t *current_x_attribute = attribute::get(light_endpoint_id, ColorControl::Id, ColorControl::Attributes::CurrentX::Id);
+-    attribute::set_deferred_persistence(current_x_attribute);
+-    attribute_t *current_y_attribute = attribute::get(light_endpoint_id, ColorControl::Id, ColorControl::Attributes::CurrentY::Id);
+-    attribute::set_deferred_persistence(current_y_attribute);
+-    attribute_t *color_temp_attribute = attribute::get(light_endpoint_id, ColorControl::Id, ColorControl::Attributes::ColorTemperatureMireds::Id);
+-    attribute::set_deferred_persistence(color_temp_attribute);
+-
+-#if CHIP_DEVICE_CONFIG_ENABLE_THREAD && CHIP_DEVICE_CONFIG_ENABLE_WIFI_STATION
+-    // Enable secondary network interface
+-    secondary_network_interface::config_t secondary_network_interface_config;
+-    endpoint = endpoint::secondary_network_interface::create(node, &secondary_network_interface_config, ENDPOINT_FLAG_NONE, nullptr);
+-    ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create secondary network interface endpoint"));
+-#endif
+-
+-#if CHIP_DEVICE_CONFIG_ENABLE_THREAD
+-    /* Set OpenThread platform config */
+-    esp_openthread_platform_config_t config = {
+-        .radio_config = ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG(),
+-        .host_config = ESP_OPENTHREAD_DEFAULT_HOST_CONFIG(),
+-        .port_config = ESP_OPENTHREAD_DEFAULT_PORT_CONFIG(),
+-    };
+-    set_openthread_platform_config(&config);
+-#endif
+-
+-#ifdef CONFIG_ENABLE_SET_CERT_DECLARATION_API
+-    auto * dac_provider = get_dac_provider();
+-#ifdef CONFIG_SEC_CERT_DAC_PROVIDER
+-    static_cast<ESP32SecureCertDACProvider *>(dac_provider)->SetCertificationDeclaration(cdSpan);
+-#elif defined(CONFIG_FACTORY_PARTITION_DAC_PROVIDER)
+-    static_cast<ESP32FactoryDataProvider *>(dac_provider)->SetCertificationDeclaration(cdSpan);
+-#endif
+-#endif // CONFIG_ENABLE_SET_CERT_DECLARATION_API
+-
+-    /* Matter start */
+-    err = esp_matter::start(app_event_cb);
+-    ABORT_APP_ON_FAILURE(err == ESP_OK, ESP_LOGE(TAG, "Failed to start Matter, err:%d", err));
+-
+-    MEMORY_PROFILER_DUMP_HEAP_STAT("matter started");
+-
+-    /* Starting driver with default values */
+-    app_driver_light_set_defaults(light_endpoint_id);
+-
+-#if CONFIG_ENABLE_ENCRYPTED_OTA
+-    err = esp_matter_ota_requestor_encrypted_init(s_decryption_key, s_decryption_key_len);
+-    ABORT_APP_ON_FAILURE(err == ESP_OK, ESP_LOGE(TAG, "Failed to initialized the encrypted OTA, err: %d", err));
+-#endif // CONFIG_ENABLE_ENCRYPTED_OTA
+-
+-#if CONFIG_ENABLE_CHIP_SHELL
+-    esp_matter::console::diagnostics_register_commands();
+-    esp_matter::console::wifi_register_commands();
+-    esp_matter::console::factoryreset_register_commands();
+-    esp_matter::console::attribute_register_commands();
+-#if CONFIG_OPENTHREAD_CLI
+-    esp_matter::console::otcli_register_commands();
+-#endif
+-    esp_matter::console::init();
+-#endif
+-
+-    while (true) {
+-        MEMORY_PROFILER_DUMP_HEAP_STAT("Idle");
+-        vTaskDelay(10000 / portTICK_PERIOD_MS);
+-    }
+-}
++}
