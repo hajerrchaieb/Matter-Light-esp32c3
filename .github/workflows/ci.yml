@@ -107,18 +107,22 @@ jobs:
             echo "No Python files found — skipping Bandit" \
               | tee ${{ env.REPORTS_DIR }}/bandit-report.json
           fi
-      # ✅ FIX 4 — cppcheck NEVER FAIL
+      # ✅ FIX 4 — cppcheck NEVER FAIL — also skips the test/ folder
+      # (Unity boilerplate triggers style warnings that are not bugs)
       - name: 🔍 cppcheck Early Static Analysis
         run: |
           if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
             cppcheck \
               --enable=all \
               --suppress=missingIncludeSystem \
+              --suppress=missingInclude \
+              --suppress=unusedFunction \
+              -i ${{ env.EXAMPLE_PATH }}/test \
               --error-exitcode=0 \
               --xml --xml-version=2 \
               ${{ env.EXAMPLE_PATH }} \
               2> ${{ env.REPORTS_DIR }}/cppcheck-report.xml || true
-            flawfinder --html ${{ env.EXAMPLE_PATH }} \
+            flawfinder --html ${{ env.EXAMPLE_PATH }}/main \
               > ${{ env.REPORTS_DIR }}/flawfinder-report.html || true
           else
             echo "Source path not found: ${{ env.EXAMPLE_PATH }}"
@@ -675,6 +679,17 @@ jobs:
               cp \"\$WORKSPACE_TEST/test_light_app_esp32c3.cpp\" \\
                  \"\$ESP_TEST/main/\" 2>/dev/null || true
 
+              # FIX — the generated test does #include \"mock_idf.h\".
+              # On the host runner g++ gets -I test_runtime, but here
+              # we are inside Docker building with idf.py, so the
+              # mock headers must sit NEXT TO the test source.
+              for h in mock_idf.h mock_led_driver.h mock_gpio.h; do
+                if [ -f \"/workspace/test_runtime/\$h\" ]; then
+                  cp \"/workspace/test_runtime/\$h\" \"\$ESP_TEST/main/\"
+                  echo \"Copied mock header: \$h\"
+                fi
+              done
+
               # Project-level CMakeLists
               printf 'cmake_minimum_required(VERSION 3.16)\ninclude(\$ENV{IDF_PATH}/tools/cmake/project.cmake)\nproject(light_test)\n' \\
                 > \"\$ESP_TEST/CMakeLists.txt\"
@@ -802,14 +817,25 @@ jobs:
           sudo apt-get install -y cppcheck flawfinder -qq
           mkdir -p ${{ env.REPORTS_DIR }}
           if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
+            # FIX — cppcheck must NOT scan the test/ folder.
+            #   Generated Unity tests intentionally use unused
+            #   functions (setUp / tearDown), helpers without
+            #   prototypes, etc. — those are NOT production code
+            #   and should not gate the release.
+            #   We also suppress missingInclude (mock_idf.h lives in
+            #   test_runtime/, not in the include path of cppcheck).
             cppcheck \
               --enable=all \
               --suppress=missingIncludeSystem \
+              --suppress=missingInclude \
+              --suppress=unusedFunction \
+              -i ${{ env.EXAMPLE_PATH }}/test \
               --error-exitcode=1 \
               --xml --xml-version=2 \
               ${{ env.EXAMPLE_PATH }} \
               2> ${{ env.REPORTS_DIR }}/cppcheck-deep.xml || true
-            flawfinder --minlevel=2 --html ${{ env.EXAMPLE_PATH }} \
+            flawfinder --minlevel=2 --html \
+              ${{ env.EXAMPLE_PATH }}/main \
               > ${{ env.REPORTS_DIR }}/flawfinder-deep.html || true
           fi
 
