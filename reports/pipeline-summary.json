@@ -1,0 +1,92 @@
+{
+  "target": "esp32c3",
+  "version": "v40",
+  "pipeline_passed": true,
+  "errors_found": true,
+  "second_run_ready": true,
+  "block_reason": "1 hardcoded secret(s) found in source code (qemu_fault_runner.py). AutoFix generated 2 patch(es) to fix them. | Code quality score too low: 4/10 (threshold: 5/10).",
+  "agents_run": 5,
+  "stage_results": {
+    "code_quality": {
+      "score": 4,
+      "quality_score": 4,
+      "issues": 0
+    },
+    "security": {
+      "score": 0,
+      "cves": 0,
+      "secrets": 1,
+      "secrets_found": 1,
+      "secrets_in_patches": 8,
+      "real_secrets": [
+        {
+          "type": "generic-api-key",
+          "rule": "generic-api-key",
+          "file": "tools/qemu_fault_runner.py",
+          "line": 117,
+          "match": "nvs_key_not_found : REDACTED",
+          "risk": "critical",
+          "action": "Remove from code, rotate the secret, use env var via os.environ.get('VAR', '')"
+        }
+      ],
+      "intentional_bug_demo": false
+    },
+    "build": {
+      "status": "success"
+    },
+    "memory": {
+      "flash_pct": "N/A"
+    },
+    "tests": {
+      "generated": 0,
+      "deployed": false,
+      "executed": 0,
+      "passed": 0,
+      "failed": 0,
+      "status": "partial",
+      "test_cases": []
+    },
+    "fault_injection": {
+      "total": 0,
+      "passed": 0,
+      "status": "not_run",
+      "robustness_score": "N/A",
+      "dynamic_score": 0
+    },
+    "autofix": {
+      "patches_generated": 2,
+      "patch_files": [
+        "autofix-esp32c3-01-security-demo_intentional_bug.py.patch",
+        "autofix-esp32c3-09-security-tools_qemu_fault_runner.py.patch"
+      ],
+      "issues_analyzed": 12,
+      "status": "patches_generated",
+      "patches_detail": [
+        {
+          "patch_name": "autofix-esp32c3-01-security-demo_intentional_bug.py.patch",
+          "file": "demo/intentional_bug.py",
+          "source_agent": "security",
+          "severity": "critical",
+          "description": "Hardcoded generic-api-key detected in autofix-esp32c3-08-security-tools_qemu_fault_runner.py.patch line 17. Action: Remove from code, rotate the secret, use env var via os.environ.get('VAR', '')",
+          "fix_method": "rule_based",
+          "valid": true
+        },
+        {
+          "patch_name": "autofix-esp32c3-09-security-tools_qemu_fault_runner.py.patch",
+          "file": "tools/qemu_fault_runner.py",
+          "source_agent": "security",
+          "severity": "critical",
+          "description": "Hardcoded generic-api-key detected in qemu_fault_runner.py line 117. Action: Remove from code, rotate the secret, use env var via os.environ.get('VAR', '')",
+          "fix_method": "llm",
+          "valid": false
+        }
+      ],
+      "manual_count": 3,
+      "fix_method": "rule_based"
+    },
+    "release": {
+      "version": "v40",
+      "canary_deploy": "simulated"
+    }
+  }
+}

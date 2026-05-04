@@ -1,6 +1,6 @@
 import os
 
-DEMO_API_KEY = "sk-demo-1234567890abcdef"
+DEMO_API_KEY = os.environ.get("DEMO_API_KEY", "")
 
 def compute_ratio(a, b):
     return a / b
