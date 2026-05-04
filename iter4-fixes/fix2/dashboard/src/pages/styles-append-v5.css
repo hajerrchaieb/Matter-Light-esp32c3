@@ -1,0 +1,107 @@
+/* ════════════════════════════════════════════════════════════════
+   v5 — Demo story timeline + small fixes
+   Append this block to the END of frontend/src/styles.css
+   ════════════════════════════════════════════════════════════════ */
+
+/* ─── Demo story strip ─────────────────────────────────────────── */
+.demo-story {
+  margin: 0 0 22px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background:
+    linear-gradient(180deg, rgba(214, 255, 58, .025), transparent 60%),
+    var(--bg-1);
+}
+.ds-kicker {
+  font-size: 10px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+  display: block;
+  margin-bottom: 14px;
+}
+.ds-track {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.ds-step {
+  flex: 1;
+  min-width: 120px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 12px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--bg-2);
+  transition: all .2s ease;
+}
+.ds-step.ds-done {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(214, 255, 58, .08),
+                                       rgba(214, 255, 58, .02));
+}
+.ds-step.ds-pending {
+  opacity: .55;
+  border-style: dashed;
+}
+.ds-icon {
+  font-size: 22px;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+.ds-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-0);
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+.ds-done .ds-label {
+  color: var(--accent);
+}
+.ds-detail {
+  font-size: 11px;
+  color: var(--fg-2);
+  margin-top: 4px;
+  line-height: 1.35;
+}
+.ds-arrow {
+  position: absolute;
+  right: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-3);
+  font-size: 14px;
+  z-index: 2;
+  pointer-events: none;
+}
+.ds-done + .ds-step .ds-arrow,
+.ds-done .ds-arrow { color: var(--accent); }
+
+@media (max-width: 720px) {
+  .ds-arrow { display: none; }
+  .ds-step  { min-width: 100%; }
+}
+
+/* ─── Card-list improvements (autofix patch cards) ─────────────── */
+.info-card .ic-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  gap: 10px;
+}
+.info-card .ic-head .mono { color: var(--fg-1); }
+
+/* ─── Badge: rule_based vs llm patches ─────────────────────────── */
+.pill.pill-info.small {
+  font-size: 9px;
+  letter-spacing: .06em;
+  padding: 2px 6px;
+}

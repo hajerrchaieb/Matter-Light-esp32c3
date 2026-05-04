@@ -1,4 +1,29 @@
 """
+agents/security_agent.py — v5 (DEDUP + DEFENSE-IN-DEPTH SCORING)
+==================================================================
+Same role as v4 but adds two important fixes that surfaced when we
+observed the dashboard reporting "9 secrets" for what is really
+ONE secret in demo/intentional_bug.py.
+
+ROOT CAUSE OF THE 9-SECRETS BUG
+-------------------------------
+Gitleaks runs once per commit history page. When the same secret
+appears multiple times in the git history (because we have rotated
+the demo secret several times during development), Gitleaks reports
+it once per occurrence — not once per current location. The previous
+agent counted EACH occurrence as a separate secret, so 1 real secret
+in 9 commits → 9 "secrets_found" entries → -27 points → score 0.
+
+FIX
+---
+Layer 0 (NEW) — Deduplicate by (file, line) BEFORE counting.
+                A secret at demo/intentional_bug.py:2 is ONE secret
+                even if it shows up in 9 commit snapshots.
+
+Layers 1-3 same as v4 (deterministic + injection + post-validation).
+
+Layer 4 (orchestrator) is unchanged.
+
 EXPECTED RESULT FOR YOUR DEMO
 -----------------------------
 1 real hardcoded secret in demo/intentional_bug.py
