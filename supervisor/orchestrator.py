@@ -1,32 +1,25 @@
 """
-supervisor/orchestrator.py — DevSecOps Pipeline Orchestrator (FINAL)
-======================================================================
-Role:
-    LangGraph-based multi-agent orchestrator. Runs all 7 AI agents
-    in dependency order, aggregates their results, and writes the
-    canonical pipeline-summary.json + pr-comment-body.md.
+supervisor/orchestrator.py — DevSecOps Pipeline Orchestrator (v6 — PFE final)
+==============================================================================
 
-LANGGRAPH FLOW:
-    code_review → security → debug → fault_analysis
-                  → test_gen → optimization → autofix → summary
+CORRECTIONS vs v5:
+  1. node_summary() écrit un pipeline-summary.json RICHE :
+       - block_reason  : pourquoi le pipeline est bloqué (texte lisible)
+       - quality_score : normalisé même si l'agent renvoie du markdown
+       - secrets_source: distingue vrais secrets (code source) vs faux
+                         positifs (secrets dans les fichiers .patch)
+       - autofix.patches_detail : liste complète des patches avec fix_method
+       - tests.test_cases        : liste des cas générés
+       - agents_run              : combien d'agents ont tourné sur 8
 
-WHY THIS VERSION (key changes vs. previous):
-    1. Defense-in-depth security score correction (Layer 4):
-       Even if security_agent.py somehow returns 0 with no threats,
-       this orchestrator checks again and corrects. Belt + braces.
+  2. Tous les champs du dashboard v5 sont désormais présents :
+       stage_results.code_quality.quality_score   (entier 0-10)
+       stage_results.security.secrets_in_source   (vrais secrets)
+       stage_results.security.secrets_in_patches  (faux positifs)
+       stage_results.autofix.fix_method           (deterministic/llm)
+       stage_results.tests.test_cases             (liste des cas)
 
-    2. release_agent removed → its changelog generation is merged
-       into optimization_agent (single agent, less LLM cost).
-
-    3. fault_injection_result is loaded from the QEMU+GDB CI artifacts,
-       not produced by an agent (it's a real measurement, not analysis).
-
-    4. node_summary now generates a rich PR comment body (markdown)
-       saved to reports/pr-comment-body.md so the CI can post it.
-
-    5. The dynamic robustness score combines:
-         robustness × 0.35  + qemu_pass × 0.25  + fuzz_pass × 0.20
-         + fault_inject_pass × 0.15  + hil_pass × 0.05
+  3. Pas de changement à la logique des agents ni du graph LangGraph.
 """
 
 import json
@@ -38,8 +31,6 @@ from typing import TypedDict
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
 
-# Make the agents/ package importable when this file is executed
-# directly via `python supervisor/orchestrator.py`
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agents.debug_agent          import run_debug_agent
@@ -57,7 +48,7 @@ REPORTS  = Path("reports")
 FIRMWARE = Path("firmware")
 
 
-# ── LangGraph state: the dict that flows through every node ───────
+# ── LangGraph state ───────────────────────────────────────────────
 class PipelineState(TypedDict):
     target: str
     source_path: str
@@ -92,7 +83,6 @@ class PipelineState(TypedDict):
 # ════════════════════════════════════════════════════════════════════
 
 def _load_json(path: Path) -> dict:
-    """Read a JSON file or return empty dict on error."""
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
@@ -100,7 +90,6 @@ def _load_json(path: Path) -> dict:
 
 
 def _load_slsa_hashes(target: str) -> dict:
-    """Parse the firmware-sha256.txt produced by the SLSA stage."""
     try:
         lines = (REPORTS / "firmware-sha256.txt").read_text().strip().splitlines()
         return {p[1]: p[0] for p in (l.strip().split() for l in lines)
@@ -110,7 +99,6 @@ def _load_slsa_hashes(target: str) -> dict:
 
 
 def _load_deploy_status() -> str:
-    """Read the OTA deploy status written by the release stage."""
     try:
         return (REPORTS / "deploy-status.txt").read_text().strip()
     except Exception:
@@ -119,20 +107,9 @@ def _load_deploy_status() -> str:
 
 def _extract_score(result: dict, *keys) -> int | str:
     """
-    Try to find a numeric score for an agent.
- 
-    1. Look in the typical JSON keys (security_score, quality_score …).
-    2. If only the markdown "review" / "summary" text is available,
-       extract the score from the "## QUALITY SCORE" section first
-       (skipping the boilerplate "from 0 to 10" header line).
-    3. As a last resort, take the LAST X/10 occurrence anywhere in
-       the text (the LLM usually writes its conclusion last).
- 
-    Returns "N/A" if no plausible score can be found.
+    Extract numeric score (0-10) from agent result.
+    Tries JSON keys first, then parses markdown text fields.
     """
-    import re
- 
-    # Step 1 — JSON keys
     for k in keys:
         v = result.get(k)
         if v is None:
@@ -143,52 +120,39 @@ def _extract_score(result: dict, *keys) -> int | str:
                 return n
         except (TypeError, ValueError):
             pass
- 
-    # Step 2 — Markdown text fields
+
     for field in ("review", "summary", "score_justification"):
         text = result.get(field, "")
         if not text:
             continue
- 
-        # Step 2a — section "## QUALITY SCORE" or "## SCORE"
         m = re.search(
             r"##\s*(?:QUALITY\s*)?SCORE\b(.*?)(?=##|$)",
             text, flags=re.I | re.S,
         )
         if m:
             section = m.group(1)
-            # Skip the literal "from 0 to 10" boilerplate
-            section = re.sub(
-                r"\bfrom\s*0\s*to\s*10\b", "", section, flags=re.I
-            )
+            section = re.sub(r"\bfrom\s*0\s*to\s*10\b", "", section, flags=re.I)
             scores = re.findall(r"\b(\d{1,2})\s*/\s*10\b", section)
             if scores:
-                # Last one wins (the LLM usually states final score last)
                 n = int(scores[-1])
                 if 0 <= n <= 10:
                     return n
- 
-        # Step 2b — explicit phrasings
+
         for pat in (
-            r"(?:overall|final|quality)\s*score\s*[:\-=]?\s*(\d{1,2})\s*/?\s*10",
+            r"(?:overall|final|quality)\s*score\s*[:\-=]?\s*(\d{1,2})\s*/?\ *10",
             r"(\d{1,2})\s*(?:out of|/)\s*10\b",
             r"score\s*[:\-=]\s*(\d{1,2})",
         ):
             scores = re.findall(pat, text, flags=re.I)
             if scores:
-                # Filter out the obvious boilerplate "0 to 10"
                 valid = [int(s) for s in scores if 0 <= int(s) <= 10]
-                # Drop a 0 IF it appears in a "0 to 10" template phrase
                 if valid:
-                    return valid[-1]   # last match = most likely conclusion
- 
-    return "N/A"
- 
+                    return valid[-1]
 
+    return "N/A"
 
 
 def _extract_build_status(d: dict) -> str:
-    """Locate the build status across the various keys agents may use."""
     for k in ("build_status", "overall_health", "status", "compilation_status"):
         v = d.get(k)
         if v:
@@ -198,15 +162,10 @@ def _extract_build_status(d: dict) -> str:
 
 
 # ════════════════════════════════════════════════════════════════════
-# CI ARTIFACT LOADER (runs once at the start of the pipeline)
+# CI ARTIFACT LOADER
 # ════════════════════════════════════════════════════════════════════
 
 def load_ci_artifacts(state: PipelineState) -> PipelineState:
-    """
-    Pre-load the static-analysis and dynamic-test reports produced by
-    earlier CI stages. The agents will read these from disk on their
-    own, but we also store them in the state for use in node_summary.
-    """
     t = state["target"]
     state["container_scan_result"]  = _load_json(REPORTS / "container-scan-summary.json")
     state["unit_test_result"]       = _load_json(REPORTS / "unit-test-results.json")
@@ -223,11 +182,10 @@ def load_ci_artifacts(state: PipelineState) -> PipelineState:
 
 
 # ════════════════════════════════════════════════════════════════════
-# AGENT NODES (one per LangGraph node)
+# AGENT NODES
 # ════════════════════════════════════════════════════════════════════
 
 def node_code_review(state: PipelineState) -> PipelineState:
-    """Stage 1: Code Review Agent."""
     print("\n" + "=" * 60 + "\nNODE: Code Review Agent")
     state["current_stage"] = "code_review"
     try:
@@ -245,15 +203,6 @@ def node_code_review(state: PipelineState) -> PipelineState:
 
 
 def node_security(state: PipelineState) -> PipelineState:
-    """
-    Stage 2: Security Agent.
-
-    DEFENSE-IN-DEPTH: even though security_agent.py now has its own
-    deterministic scoring, we ALSO check here. If the score arrives
-    as 0/10 but no secrets and no critical CVEs were found, we force
-    it back to 10/10. This guards against bugs in the agent's own
-    correction logic.
-    """
     print("\n" + "=" * 60 + "\nNODE: Security Agent")
     state["current_stage"] = "security"
     try:
@@ -262,9 +211,6 @@ def node_security(state: PipelineState) -> PipelineState:
         secrets = result.get("secrets_found",  []) or []
         n_crit  = len(result.get("critical_cves", []) or [])
 
-        # Layer 4 of defense-in-depth scoring (in addition to the three
-        # layers inside security_agent.py). If we still see 0 with no
-        # threats, we override one final time at the orchestrator level.
         if score == 0 and len(secrets) == 0 and n_crit == 0:
             score = 10
             result["security_score"] = 10
@@ -277,7 +223,6 @@ def node_security(state: PipelineState) -> PipelineState:
         result["security_score"] = score
         state["security_result"] = result
 
-        # Mark errors only if real problems exist
         if (isinstance(score, int) and score < 6) or len(secrets) > 0:
             state["errors_found"] = True
     except Exception as e:
@@ -288,7 +233,6 @@ def node_security(state: PipelineState) -> PipelineState:
 
 
 def node_debug(state: PipelineState) -> PipelineState:
-    """Stage 3: Debug Agent — root-cause analysis of build/test failures."""
     print("\n" + "=" * 60 + "\nNODE: Debug Agent")
     state["current_stage"] = "debug"
     try:
@@ -305,17 +249,6 @@ def node_debug(state: PipelineState) -> PipelineState:
 
 
 def node_fault_analysis(state: PipelineState) -> PipelineState:
-    """
-    Stage 4: Fault Analysis Agent — analyses the QEMU+GDB fault
-    injection results and produces a robustness score.
-
-    Also computes the dynamic composite score combining:
-       robustness  × 0.35
-       qemu boot   × 0.25
-       fuzz clean  × 0.20
-       fault inj   × 0.15
-       hil pass    × 0.05
-    """
     print("\n" + "=" * 60 + "\nNODE: Fault Analysis Agent")
     state["current_stage"] = "fault_analysis"
     try:
@@ -325,7 +258,6 @@ def node_fault_analysis(state: PipelineState) -> PipelineState:
         if isinstance(score, (int, float)) and score < 5:
             state["errors_found"] = True
 
-        # Combine with the dynamic measurements
         fi     = state.get("fault_injection_result", {})
         qemu_r = _load_json(REPORTS / "qemu-dynamic-report.json")
         fuzz_r = _load_json(REPORTS / f"fuzz-report-{state['target']}.json")
@@ -357,7 +289,6 @@ def node_fault_analysis(state: PipelineState) -> PipelineState:
 
 
 def node_test_gen(state: PipelineState) -> PipelineState:
-    """Stage 5: Test Generation Agent — generates Unity tests."""
     print("\n" + "=" * 60 + "\nNODE: Test Generation Agent")
     state["current_stage"] = "test_gen"
     try:
@@ -376,11 +307,7 @@ def node_test_gen(state: PipelineState) -> PipelineState:
 
 
 def node_optimization(state: PipelineState) -> PipelineState:
-    """
-    Stage 6: Optimization + Release Agent (merged).
-    Also produces release_changelog.md (formerly the release_agent's job).
-    """
-    print("\n" + "=" * 60 + "\nNODE: Optimization + Release Agent (merged)")
+    print("\n" + "=" * 60 + "\nNODE: Optimization + Release Agent")
     state["current_stage"] = "optimization"
     try:
         result = run_optimization_agent(
@@ -398,16 +325,12 @@ def node_optimization(state: PipelineState) -> PipelineState:
 
 
 def node_autofix(state: PipelineState) -> PipelineState:
-    """
-    Stage 7: AutoFix Agent — generates .patch files from agent issues.
-    Patches are NOT applied here; CI Stage 4b/4c does the apply step.
-    """
     print("\n" + "=" * 60 + "\nNODE: AutoFix Agent")
     state["current_stage"] = "autofix"
     try:
         result = run_autofix_agent(
-            target         = state["target"],
-            apply_patches  = False,   # CI applies them, not us
+            target        = state["target"],
+            apply_patches = False,
         )
         state["autofix_result"]    = result
         state["patches_generated"] = result.get("patches_generated", 0)
@@ -420,11 +343,33 @@ def node_autofix(state: PipelineState) -> PipelineState:
     return state
 
 
+# ════════════════════════════════════════════════════════════════════
+# NODE SUMMARY — CORRIGÉ v6
+# Écrit un pipeline-summary.json complet pour le dashboard
+# ════════════════════════════════════════════════════════════════════
+
+def _classify_secrets(secrets: list) -> tuple[list, list]:
+    """
+    Sépare les vrais secrets (dans le code source) des faux positifs
+    (dans les fichiers .patch générés par autofix ou dans reports/).
+    Retourne (real_secrets, false_positives).
+    """
+    real     = []
+    fp       = []
+    fp_paths = (".patch", "reports/patches/", ".autofix-reports/",
+                "reports/gitleaks", "/tmp/")
+    for s in secrets:
+        f = s.get("file", "")
+        if any(p in f for p in fp_paths):
+            fp.append(s)
+        else:
+            real.append(s)
+    return real, fp
+
+
 def node_summary(state: PipelineState) -> PipelineState:
     """
-    Stage 8: Aggregate everything into pipeline-summary.json AND a rich
-    markdown PR comment body. This is what the dashboard reads and
-    what GitHub posts on the PR.
+    Stage 8: Agrège tout en pipeline-summary.json riche + PR comment.
     """
     print("\n" + "=" * 60 + "\nNODE: Pipeline Summary")
     state["current_stage"] = "summary"
@@ -441,11 +386,11 @@ def node_summary(state: PipelineState) -> PipelineState:
     _fi  = state.get("fault_injection_result", {})
     _ut  = state.get("unit_test_result",      {})
 
-    # Pull scores defensively
-    code_score = _cr.get("quality_score",  "N/A")
+    # ── Scores ────────────────────────────────────────────────────
+    code_score = _cr.get("quality_score", "N/A")
     if code_score == "N/A":
         code_score = _extract_score(_cr, "quality_score", "score")
-    sec_score  = _sec.get("security_score", "N/A")
+    sec_score = _sec.get("security_score", "N/A")
     if sec_score == "N/A":
         sec_score = _extract_score(_sec, "security_score", "score")
 
@@ -454,28 +399,57 @@ def node_summary(state: PipelineState) -> PipelineState:
     rob_score  = _fa.get("robustness_score", "N/A")
     dyn_score  = state.get("dynamic_score", "N/A")
     n_cves     = len(_sec.get("critical_cves",  []) or [])
-    n_secrets  = len(_sec.get("secrets_found",  []) or [])
-    n_patches  = state.get("patches_generated", 0)
-    tests_ok   = state.get("tests_deployed",    False)
-    errors     = state.get("errors_found",      False)
 
-    n_tests    = len(_tg.get("test_cases", []))
+    # ── Secrets : séparer vrais vs faux positifs ──────────────────
+    all_secrets = _sec.get("secrets_found", []) or []
+    real_secrets, fp_secrets = _classify_secrets(all_secrets)
+    n_real_secrets = len(real_secrets)
+    n_fp_secrets   = len(fp_secrets)
+    # Utiliser uniquement les vrais secrets pour évaluer le risque
+    n_secrets = n_real_secrets
+
+    n_patches  = state.get("patches_generated", 0)
+    tests_ok   = state.get("tests_deployed", False)
+    errors     = state.get("errors_found", False)
+
+    # ── Tests ─────────────────────────────────────────────────────
+    test_cases = _tg.get("test_cases", [])
+    n_tests    = len(test_cases)
     if n_tests == 0 and (REPORTS / f"generated_tests_{target}.cpp").exists():
         n_tests = 1
-
-    # Test execution stats from the canonical aggregated test file
     ut_status  = _ut.get("status",  "no_tests_yet")
     ut_passed  = _ut.get("passed",  0)
     ut_failed  = _ut.get("failed",  0)
     ut_total   = _ut.get("total",   0)
+
+    # ── Fault injection ───────────────────────────────────────────
     fi_total   = _fi.get("total_scenarios", 0)
     fi_passed  = _fi.get("passed",          0)
     fi_status  = _fi.get("overall_status",  "not_run")
-    patches_detail = _af.get("patches_detail", [])
+
+    # ── AutoFix details ───────────────────────────────────────────
+    patches_detail  = _af.get("patches_detail", []) or []
+    manual_instr    = _af.get("manual_instructions", []) or []
+    # Enrichir fix_method si absent (déterministe = rule_based)
+    for p in patches_detail:
+        if not p.get("fix_method"):
+            p["fix_method"] = "rule_based"
 
     second_run_ready = n_patches > 0 or tests_ok
 
-    # Pipeline pass criteria: no errors, OR errors but patches available
+    # ── Agents run count (sur 8) ──────────────────────────────────
+    agents_run = sum([
+        bool(_cr and not _cr.get("error")),
+        bool(_sec and not _sec.get("error")),
+        bool(_dbg and not _dbg.get("error")),
+        bool(_fa and not _fa.get("error")),
+        bool(_tg and not _tg.get("error")),
+        bool(_opt and not _opt.get("error")),
+        bool(_af and not _af.get("error")),
+        True,  # summary/orchestrator = toujours OK
+    ])
+
+    # ── Pipeline pass criteria ────────────────────────────────────
     if not errors:
         state["pipeline_passed"] = True
     elif n_patches > 0:
@@ -484,22 +458,45 @@ def node_summary(state: PipelineState) -> PipelineState:
         state["pipeline_passed"] = False
     passed = state["pipeline_passed"]
 
-    # Console summary banner
+    # ── Block reason (texte lisible pour le dashboard) ────────────
+    block_reasons = []
+    if n_real_secrets > 0:
+        block_reasons.append(
+            f"{n_real_secrets} hardcoded secret(s) found in source code "
+            f"({', '.join(s.get('file', '?').split('/')[-1] for s in real_secrets[:3])}). "
+            f"AutoFix generated {n_patches} patch(es) to fix them."
+        )
+    if n_fp_secrets > 0:
+        print(f"[Orchestrator] NOTE: {n_fp_secrets} secret(s) in .patch files "
+              f"are false positives (gitleaks scanning its own patch output).")
+    if isinstance(code_score, int) and code_score < 5:
+        block_reasons.append(
+            f"Code quality score too low: {code_score}/10 (threshold: 5/10)."
+        )
+    if isinstance(sec_score, int) and sec_score < 6 and n_real_secrets == 0:
+        block_reasons.append(
+            f"Security score below threshold: {sec_score}/10 (threshold: 6/10)."
+        )
+    block_reason = " | ".join(block_reasons) if block_reasons else None
+
+    # ── Console summary banner ────────────────────────────────────
     print("\n" + "\n".join([
-        "╔══════════════════════════════════════════╗",
+        "╔══════════════════════════════════════════════════════╗",
         f"║ Code Review : {code_score}/10",
-        f"║ Security    : {sec_score}/10  CVEs={n_cves}  Secrets={n_secrets}",
+        f"║ Security    : {sec_score}/10  CVEs={n_cves}  "
+        f"Real secrets={n_real_secrets}  FP secrets (patches)={n_fp_secrets}",
         f"║ Build       : {build_ok}",
         f"║ Tests       : gen={n_tests}  run={ut_passed}/{ut_total}  {ut_status}",
         f"║ Fault Inject: {fi_passed}/{fi_total}  {fi_status}",
         f"║ Memory      : Flash {flash_pct}%",
         f"║ Robustness  : {rob_score}/10  Dynamic={dyn_score}/10",
-        f"║ AutoFix     : {n_patches} patch(es)",
+        f"║ AutoFix     : {n_patches} patch(es)  agents={agents_run}/8",
         f"║ Overall     : {'PASSED ✅' if passed else 'ISSUES ⚠️'}",
-        "╚══════════════════════════════════════════╝",
+        f"║ Block reason: {block_reason or 'none'}",
+        "╚══════════════════════════════════════════════════════╝",
     ]))
 
-    # ── Rich PR comment body (markdown) ────────────────────────────
+    # ── PR comment body ───────────────────────────────────────────
     pr_lines = [
         "## 🤖 AI Agent Analysis Report", "",
         f"**Target:** `{target}` | **Version:** `{version}` | "
@@ -509,7 +506,7 @@ def node_summary(state: PipelineState) -> PipelineState:
         "|-------|--------|---------|",
         f"| 🔍 Code Review | `{code_score}/10` | Static analysis of ESP-Matter C++ source |",
         f"| 🔐 Security    | `{sec_score}/10` | "
-        f"{n_secrets} secret(s) · {n_cves} critical CVE(s) |",
+        f"{n_real_secrets} real secret(s) · {n_cves} critical CVE(s) |",
         f"| 🔨 Build       | `{build_ok}` | ESP-IDF `idf.py build` esp32c3 |",
         f"| 💾 Memory      | Flash `{flash_pct}%` | ESP32-C3 4MB flash |",
         f"| 🛡️ Robustness  | `{rob_score}/10` | "
@@ -554,26 +551,40 @@ def node_summary(state: PipelineState) -> PipelineState:
         ]
     pr_lines += [""]
 
-    if n_secrets > 0:
+    if n_real_secrets > 0:
         pr_lines += [
-            "### 🚨 Secrets Found", "",
+            "### 🚨 Real Secrets Found (source code only)", "",
             "| Type | File | Action |",
             "|------|------|--------|",
         ]
-        for s in _sec.get("secrets_found", [])[:5]:
+        for s in real_secrets[:5]:
             pr_lines.append(
                 f"| {s.get('type', '?')} | `{s.get('file', '?')}` | "
                 f"{s.get('action', 'rotate immediately')} |"
             )
         pr_lines += [""]
 
+    if n_fp_secrets > 0:
+        pr_lines += [
+            f"> ℹ️ Note: {n_fp_secrets} additional secret(s) detected "
+            f"in generated `.patch` files — these are **false positives** "
+            f"(gitleaks scanning its own autofix output).",
+            "",
+        ]
+
+    if block_reason:
+        pr_lines += [
+            "### ❌ Pipeline Block Reason", "",
+            f"> {block_reason}", "",
+        ]
+
     pr_lines += [
         "---",
-        "*Generated by 7 AI agents — Groq `llama-3.3-70b-versatile`*",
+        f"*Generated by {agents_run}/8 AI agents — Groq `llama-3.3-70b-versatile`*",
     ]
     state["pr_comment_body"] = "\n".join(pr_lines)
 
-    # ── Persist outputs ────────────────────────────────────────────
+    # ── Persist outputs ───────────────────────────────────────────
     REPORTS.mkdir(exist_ok=True)
     (REPORTS / "pr-comment-body.md").write_text(
         state["pr_comment_body"], encoding="utf-8"
@@ -585,25 +596,41 @@ def node_summary(state: PipelineState) -> PipelineState:
         "pipeline_passed":  passed,
         "errors_found":     errors,
         "second_run_ready": second_run_ready,
+        "block_reason":     block_reason,          # ← NOUVEAU
+        "agents_run":       agents_run,            # ← NOUVEAU
         "stage_results": {
-            "code_quality":    {
-                "score":  code_score,
-                "issues": len(_cr.get("issues", []) or []),
+            "code_quality": {
+                "score":         code_score,
+                "quality_score": code_score,       # ← alias pour le dashboard
+                "issues":        len(_cr.get("issues", []) or []),
             },
-            "security":        {
-                "score":   sec_score,
-                "cves":    n_cves,
-                "secrets": n_secrets,
+            "security": {
+                "score":               sec_score,
+                "cves":                n_cves,
+                "secrets":             n_secrets,            # vrais seulement
+                "secrets_found":       n_real_secrets,       # ← NOUVEAU
+                "secrets_in_patches":  n_fp_secrets,         # ← NOUVEAU (FP)
+                "real_secrets":        real_secrets[:10],    # ← NOUVEAU détails
+                "intentional_bug_demo": any(
+                    "intentional_bug" in s.get("file", "")
+                    for s in real_secrets
+                ),
             },
-            "build":           {"status": build_ok},
-            "memory":          {"flash_pct": flash_pct},
-            "tests":           {
-                "generated": n_tests,
-                "deployed":  tests_ok,
-                "executed":  ut_total,
-                "passed":    ut_passed,
-                "failed":    ut_failed,
-                "status":    ut_status,
+            "build":  {"status": build_ok},
+            "memory": {"flash_pct": flash_pct},
+            "tests": {
+                "generated":  n_tests,
+                "deployed":   tests_ok,
+                "executed":   ut_total,
+                "passed":     ut_passed,
+                "failed":     ut_failed,
+                "status":     ut_status,
+                "test_cases": [          # ← NOUVEAU liste des cas
+                    {"name": tc.get("name", "?"),
+                     "type": tc.get("type", "?"),
+                     "area": tc.get("area", "?")}
+                    for tc in test_cases[:20]
+                ],
             },
             "fault_injection": {
                 "total":            fi_total,
@@ -612,18 +639,25 @@ def node_summary(state: PipelineState) -> PipelineState:
                 "robustness_score": rob_score,
                 "dynamic_score":    dyn_score,
             },
-            "autofix":         {
+            "autofix": {
                 "patches_generated": n_patches,
                 "patch_files":       _af.get("patch_files", []),
                 "issues_analyzed":   _af.get("issues_analyzed", 0),
                 "status":            _af.get("status", "unknown"),
+                "patches_detail":    patches_detail,    # ← NOUVEAU complet
+                "manual_count":      len(manual_instr), # ← NOUVEAU
+                "fix_method":        (                  # ← NOUVEAU
+                    patches_detail[0].get("fix_method", "unknown")
+                    if patches_detail else "none"
+                ),
             },
-            "release":         {
+            "release": {
                 "version":       version,
                 "canary_deploy": state.get("deploy_status", "not_run"),
             },
         },
     }, indent=2), encoding="utf-8")
+
     print("[Orchestrator] pipeline-summary.json + pr-comment-body.md saved")
     return state
 
@@ -633,17 +667,16 @@ def node_summary(state: PipelineState) -> PipelineState:
 # ════════════════════════════════════════════════════════════════════
 
 def build_pipeline_graph():
-    """Wire up the LangGraph DAG of agent nodes."""
     g = StateGraph(PipelineState)
     for name, fn in [
-        ("code_review",     node_code_review),
-        ("security",        node_security),
-        ("debug",           node_debug),
-        ("fault_analysis",  node_fault_analysis),
-        ("test_gen",        node_test_gen),
-        ("optimization",    node_optimization),
-        ("autofix",         node_autofix),
-        ("summary",         node_summary),
+        ("code_review",    node_code_review),
+        ("security",       node_security),
+        ("debug",          node_debug),
+        ("fault_analysis", node_fault_analysis),
+        ("test_gen",       node_test_gen),
+        ("optimization",   node_optimization),
+        ("autofix",        node_autofix),
+        ("summary",        node_summary),
     ]:
         g.add_node(name, fn)
     g.set_entry_point("code_review")
@@ -662,12 +695,10 @@ def build_pipeline_graph():
 
 
 def run_pipeline(target: str = TARGET, version: str = "v1.0.0") -> PipelineState:
-    """Programmatic entry point used by the CI."""
     REPORTS.mkdir(exist_ok=True)
     initial: PipelineState = {
         "target": target,
-        "source_path": os.getenv("EXAMPLE_PATH",
-                                 "esp-matter/examples/light"),
+        "source_path": os.getenv("EXAMPLE_PATH", "esp-matter/examples/light"),
         "version": version,
         "code_review_result":    {},
         "security_result":       {},
@@ -699,8 +730,8 @@ def run_pipeline(target: str = TARGET, version: str = "v1.0.0") -> PipelineState
 
 if __name__ == "__main__":
     import argparse
-    p = argparse.ArgumentParser()
-    p.add_argument("--target",  default=os.getenv("TARGET_CHIP", TARGET))
-    p.add_argument("--version", default="v1.0.0")
-    a = p.parse_args()
-    run_pipeline(target=a.target, version=a.version)
+    parser = argparse.ArgumentParser(description="DevSecOps Pipeline Orchestrator")
+    parser.add_argument("--target",  default=os.getenv("TARGET_CHIP", "esp32c3"))
+    parser.add_argument("--version", default="v1.0.0")
+    args = parser.parse_args()
+    run_pipeline(target=args.target, version=args.version)

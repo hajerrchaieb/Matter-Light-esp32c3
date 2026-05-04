@@ -160,7 +160,8 @@ jobs:
           # Exclude .env and reports/ from scan (contain runtime-generated secrets)
           # Create .gitleaksignore if not present
           if [ ! -f .gitleaksignore ]; then
-            printf '.env\nreports/\n.autofix-reports/\n'               > /tmp/.gitleaksignore
+            printf '.env\nreports/\n.autofix-reports/\n' \
+              > /tmp/.gitleaksignore
             IGNORE_FLAG="--gitleaks-ignore-path=/tmp/.gitleaksignore"
           else
             IGNORE_FLAG="--gitleaks-ignore-path=.gitleaksignore"
@@ -412,11 +413,6 @@ jobs:
       # ─────────────────────────────────────────────────────────────
       # Test path A — Host-side fast unit tests
       # ─────────────────────────────────────────────────────────────
-      # Generated tests are compiled with g++ against the small mock
-      # ESP-IDF runtime in test_runtime/. This gives the developer a
-      # ~30 second feedback loop on every PR. The QEMU integration
-      # path below covers what the mocks cannot (real ESP-IDF, Matter
-      # commissioning, NVS persistence).
       - name: Find or generate test file
         id: locate_test
         run: |
@@ -497,7 +493,6 @@ jobs:
                     'note':'No test file present — Stage AI will generate one this run'},
                     open('${{ env.REPORTS_DIR }}/unit-test-results-host.json','w'), indent=2)
           "
-
 
       - name: Install Espressif QEMU for ESP32-C3
         run: |
@@ -648,11 +643,6 @@ jobs:
       # ─────────────────────────────────────────────────────────────
       # Test path B — QEMU integration tests (real ESP-IDF + Unity)
       # ─────────────────────────────────────────────────────────────
-      # Compile the SAME test file inside the Docker image with the
-      # real ESP-IDF Unity component, merge the binaries, boot them
-      # in QEMU, capture the UART, parse Unity output. This catches
-      # bugs the host runtime cannot see (ESP-IDF behaviour, real
-      # cluster handlers, NVS, FreeRTOS scheduling).
       - name: QEMU integration test — build test firmware
         if: |
           steps.locate_test.outputs.has_tests == 'true' &&
@@ -679,10 +669,6 @@ jobs:
               cp \"\$WORKSPACE_TEST/test_light_app_esp32c3.cpp\" \\
                  \"\$ESP_TEST/main/\" 2>/dev/null || true
 
-              # FIX — the generated test does #include \"mock_idf.h\".
-              # On the host runner g++ gets -I test_runtime, but here
-              # we are inside Docker building with idf.py, so the
-              # mock headers must sit NEXT TO the test source.
               for h in mock_idf.h mock_led_driver.h mock_gpio.h; do
                 if [ -f \"/workspace/test_runtime/\$h\" ]; then
                   cp \"/workspace/test_runtime/\$h\" \"\$ESP_TEST/main/\"
@@ -690,11 +676,9 @@ jobs:
                 fi
               done
 
-              # Project-level CMakeLists
               printf 'cmake_minimum_required(VERSION 3.16)\ninclude(\$ENV{IDF_PATH}/tools/cmake/project.cmake)\nproject(light_test)\n' \\
                 > \"\$ESP_TEST/CMakeLists.txt\"
 
-              # Component CMakeLists — link the REAL Unity component
               printf 'idf_component_register(\n    SRCS \"test_light_app_esp32c3.cpp\"\n    INCLUDE_DIRS \".\"\n    REQUIRES unity esp_system\n)\n' \\
                 > \"\$ESP_TEST/main/CMakeLists.txt\"
 
@@ -702,7 +686,6 @@ jobs:
               idf.py set-target esp32c3
               idf.py build 2>&1 | tee /workspace/${{ env.REPORTS_DIR }}/qemu-test-build.log || true
 
-              # Copy artefacts to host workspace
               cp build/*.bin                     /workspace/${{ env.FIRMWARE_DIR }}/esp32c3-tests/ 2>/dev/null || true
               cp build/bootloader/*.bin          /workspace/${{ env.FIRMWARE_DIR }}/esp32c3-tests/ 2>/dev/null || true
               cp build/partition_table/*.bin     /workspace/${{ env.FIRMWARE_DIR }}/esp32c3-tests/ 2>/dev/null || true
@@ -733,7 +716,6 @@ jobs:
           mkdir -p ${{ env.REPORTS_DIR }}
           FW_DIR="${{ env.FIRMWARE_DIR }}/esp32c3-tests"
 
-          # Merge test firmware binaries
           BOOTLOADER=$(find "$FW_DIR" -name "bootloader.bin" | head -1)
           PARTITION=$(find "$FW_DIR" -name "partition-table.bin" | head -1)
           APP=$(find "$FW_DIR" -maxdepth 1 -name "*.bin" \
@@ -791,7 +773,6 @@ jobs:
         if: always()
         run: |
           mkdir -p ${{ env.REPORTS_DIR }}
-          # Make sure both inputs exist (worst case empty fallbacks)
           [ -f ${{ env.REPORTS_DIR }}/unit-test-results-host.json ] || \
             python3 -c "import json; json.dump({'runner':'host','status':'missing'}, open('${{ env.REPORTS_DIR }}/unit-test-results-host.json','w'))"
           [ -f ${{ env.REPORTS_DIR }}/unit-test-results-qemu.json ] || \
@@ -817,13 +798,6 @@ jobs:
           sudo apt-get install -y cppcheck flawfinder -qq
           mkdir -p ${{ env.REPORTS_DIR }}
           if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
-            # FIX — cppcheck must NOT scan the test/ folder.
-            #   Generated Unity tests intentionally use unused
-            #   functions (setUp / tearDown), helpers without
-            #   prototypes, etc. — those are NOT production code
-            #   and should not gate the release.
-            #   We also suppress missingInclude (mock_idf.h lives in
-            #   test_runtime/, not in the include path of cppcheck).
             cppcheck \
               --enable=all \
               --suppress=missingIncludeSystem \
@@ -842,7 +816,8 @@ jobs:
       - name: Quality Gate — Enforce cppcheck
         run: |
           if [ -f ${{ env.REPORTS_DIR }}/cppcheck-deep.xml ]; then
-            ERROR_COUNT=$(grep -c 'severity="error"'               ${{ env.REPORTS_DIR }}/cppcheck-deep.xml 2>/dev/null || echo 0)
+            ERROR_COUNT=$(grep -c 'severity="error"' \
+              ${{ env.REPORTS_DIR }}/cppcheck-deep.xml 2>/dev/null || echo 0)
             echo "cppcheck errors: $ERROR_COUNT"
             if [ "$ERROR_COUNT" -gt "0" ]; then
               echo "::error::Quality gate failed — $ERROR_COUNT cppcheck error(s)"
@@ -1056,10 +1031,12 @@ jobs:
         run: |
           mkdir -p ${{ env.REPORTS_DIR }}
           if [ ! -f ${{ env.REPORTS_DIR }}/run-history.json ]; then
-            echo '{"runs":[],"run_count":0}'               > ${{ env.REPORTS_DIR }}/run-history.json
+            echo '{"runs":[],"run_count":0}' > ${{ env.REPORTS_DIR }}/run-history.json
             echo "First run — baseline history created"
           else
-            echo "History found: $(cat ${{ env.REPORTS_DIR }}/run-history.json               | python3 -c 'import json,sys; d=json.load(sys.stdin);               print(str(d.get("run_count",0)) + " run(s)")')"
+            echo "History found: $(cat ${{ env.REPORTS_DIR }}/run-history.json \
+              | python3 -c 'import json,sys; d=json.load(sys.stdin); \
+              print(str(d.get("run_count",0)) + " run(s)")')"
           fi
 
       - name: Download lint reports (Stage 1)
@@ -1117,7 +1094,17 @@ jobs:
           ls -la ${{ env.REPORTS_DIR }}/ 2>/dev/null || echo "No reports dir"
           echo ""
           echo "=== Key reports status ==="
-          for f in             build-esp32c3.log             size-esp32c3.txt             unit-test-results.json             qemu-dynamic-report.json             cppcheck-deep.xml             sbom-spdx.json             gitleaks-report.json             grype-report.json             container-scan-summary.json             firmware-sha256.txt; do
+          for f in \
+            build-esp32c3.log \
+            size-esp32c3.txt \
+            unit-test-results.json \
+            qemu-dynamic-report.json \
+            cppcheck-deep.xml \
+            sbom-spdx.json \
+            gitleaks-report.json \
+            grype-report.json \
+            container-scan-summary.json \
+            firmware-sha256.txt; do
             if [ -f "${{ env.REPORTS_DIR }}/$f" ]; then
               SIZE=$(wc -c < "${{ env.REPORTS_DIR }}/$f")
               echo "  OK ($SIZE bytes): $f"
@@ -1178,7 +1165,17 @@ jobs:
           fi
           # 2. Required agent files
           MISSING=0
-          for f in             supervisor/orchestrator.py             agents/debug_agent.py             agents/security_agent.py             agents/code_review_agent.py             agents/test_gen_agent.py             agents/optimization_agent.py             agents/release_agent.py             agents/fault_analysis_agent.py             agents/autofix_agent.py             agents/regression_detector.py; do
+          for f in \
+            supervisor/orchestrator.py \
+            agents/debug_agent.py \
+            agents/security_agent.py \
+            agents/code_review_agent.py \
+            agents/test_gen_agent.py \
+            agents/optimization_agent.py \
+            agents/release_agent.py \
+            agents/fault_analysis_agent.py \
+            agents/autofix_agent.py \
+            agents/regression_detector.py; do
             if [ -f "$f" ]; then
               echo "  OK: $f"
             else
@@ -1200,6 +1197,12 @@ jobs:
           fi
           echo "=== Pre-flight passed ==="
 
+      # ════════════════════════════════════════════════════════════
+      # ✅ UPDATED STEP v5 — Run AI Agents Orchestrator
+      # FIX: robust JSON parsing without nested shell quoting issues,
+      #      explicit error handling if pipeline-summary.json missing,
+      #      full debug dump always visible.
+      # ════════════════════════════════════════════════════════════
       - name: Run AI Agents Orchestrator (Agents 1-8 + AutoFix)
         id: run_agents
         env:
@@ -1211,56 +1214,65 @@ jobs:
             echo "::error::GROQ_API_KEY not configured"
             exit 1
           fi
+
           python3 supervisor/orchestrator.py \
             --target esp32c3 \
             --version "v${{ github.run_number }}" \
             2>&1 | tee ${{ env.REPORTS_DIR }}/orchestrator-run.log
 
-          # Parse outputs from pipeline-summary.json
-          if [ -f ${{ env.REPORTS_DIR }}/pipeline-summary.json ]; then
-            PASSED=$(python3 -c "
-          import json
-          with open('${{ env.REPORTS_DIR }}/pipeline-summary.json') as f:
-            d = json.load(f)
-          print('true' if d.get('pipeline_passed', False) else 'false')
-          ")
-            SEC=$(python3 -c "
-          import json
-          with open('${{ env.REPORTS_DIR }}/pipeline-summary.json') as f:
-            d = json.load(f)
-          print(d.get('stage_results',{}).get('security',{}).get('score','N/A'))
-          ")
-            QUA=$(python3 -c "
-          import json
-          with open('${{ env.REPORTS_DIR }}/pipeline-summary.json') as f:
-            d = json.load(f)
-          print(d.get('stage_results',{}).get('code_quality',{}).get('score','N/A'))
-          ")
-            PATCHES=$(python3 -c "
-          import json
-          with open('${{ env.REPORTS_DIR }}/pipeline-summary.json') as f:
-            d = json.load(f)
-          print(d.get('stage_results',{}).get('autofix',{}).get('patches_generated',0))
-          " 2>/dev/null || echo "0")
-          else
-            echo "::warning::pipeline-summary.json not found — defaulting"
-            PASSED="true"; SEC="N/A"; QUA="N/A"; PATCHES="0"
+          # ── Parse outputs depuis pipeline-summary.json ──────────
+          SUMMARY_FILE="${{ env.REPORTS_DIR }}/pipeline-summary.json"
+
+          if [ ! -f "$SUMMARY_FILE" ]; then
+            echo "::error::pipeline-summary.json not created — orchestrator may have crashed"
+            echo "=== Last 80 lines of orchestrator log ==="
+            tail -80 ${{ env.REPORTS_DIR }}/orchestrator-run.log || true
+            # Valeurs par défaut pour ne pas bloquer les steps suivants
+            echo "ai_passed=false"       >> $GITHUB_OUTPUT
+            echo "security_score=N/A"   >> $GITHUB_OUTPUT
+            echo "quality_score=N/A"    >> $GITHUB_OUTPUT
+            echo "patches_count=0"      >> $GITHUB_OUTPUT
+            echo "block_reason=orchestrator crashed" >> $GITHUB_OUTPUT
+            echo "agents_run=0"         >> $GITHUB_OUTPUT
+            exit 1
           fi
 
-          echo "ai_passed=$PASSED"      >> $GITHUB_OUTPUT
-          echo "security_score=$SEC"    >> $GITHUB_OUTPUT
-          echo "quality_score=$QUA"     >> $GITHUB_OUTPUT
-          echo "patches_count=$PATCHES" >> $GITHUB_OUTPUT
-          echo "AI: passed=$PASSED | sec=$SEC/10 | quality=$QUA/10 | patches=$PATCHES"
+          # Lecture robuste avec python3 (pas de guillemets imbriqués)
+          python3 - "$SUMMARY_FILE" << 'PARSE_EOF'
+          import json, sys, os
 
-          # Debug: if scores are N/A show last 50 lines of orchestrator log
-          if [ "$SEC" = "N/A" ] || [ "$QUA" = "N/A" ]; then
-            echo "::warning::Scores are N/A — showing orchestrator log tail"
-            echo "=== Last 60 lines of orchestrator-run.log ==="
-            tail -60 ${{ env.REPORTS_DIR }}/orchestrator-run.log 2>/dev/null || true
-            echo "=== pipeline-summary.json content ==="
-            cat ${{ env.REPORTS_DIR }}/pipeline-summary.json 2>/dev/null               | python3 -m json.tool 2>/dev/null || true
-          fi
+          path = sys.argv[1]
+          with open(path) as f:
+              s = json.load(f)
+
+          sr = s.get("stage_results", {})
+
+          passed   = str(s.get("pipeline_passed", False)).lower()
+          sec      = str(sr.get("security", {}).get("score", "N/A"))
+          quality  = str(sr.get("code_quality", {}).get("quality_score",
+                           sr.get("code_quality", {}).get("score", "N/A")))
+          patches  = str(sr.get("autofix", {}).get("patches_generated", 0))
+          agents   = str(s.get("agents_run", "N/A"))
+          reason   = str(s.get("block_reason") or "none").replace("\n", " ")[:200]
+
+          gho = os.environ.get("GITHUB_OUTPUT", "/dev/null")
+          with open(gho, "a") as f:
+              f.write(f"ai_passed={passed}\n")
+              f.write(f"security_score={sec}\n")
+              f.write(f"quality_score={quality}\n")
+              f.write(f"patches_count={patches}\n")
+              f.write(f"agents_run={agents}\n")
+              f.write(f"block_reason={reason}\n")
+
+          print(f"AI summary — passed={passed} | sec={sec}/10 | "
+                f"quality={quality}/10 | patches={patches} | agents={agents}/8")
+          print(f"Block reason: {reason}")
+          PARSE_EOF
+
+          # Afficher le contenu complet pour le debug CI
+          echo ""
+          echo "=== pipeline-summary.json ==="
+          python3 -m json.tool "$SUMMARY_FILE" 2>/dev/null || cat "$SUMMARY_FILE"
 
       - name: Regression Detection
         if: always()
@@ -1295,56 +1307,236 @@ jobs:
             print(f"::warning::Regression detection error: {e}")
           PYEOF
 
+      # ════════════════════════════════════════════════════════════
+      # ✅ UPDATED STEP v5 — Post AI Summary to GitHub Step Summary
+      # FIX: full rich summary with secrets real vs FP, patches
+      #      detail, test cases, closed-loop status table.
+      # ════════════════════════════════════════════════════════════
       - name: Post AI Summary to GitHub
         if: always()
         run: |
-          if [ -f ${{ env.REPORTS_DIR }}/pipeline-summary.json ]; then
-            python3 << 'PYEOF'
-          import json, os
-          with open(os.environ.get('REPORTS_DIR','reports') + '/pipeline-summary.json') as f:
-            s = json.load(f)
-          sr = s.get('stage_results', {})
-          sec = sr.get('security', {})
-          cod = sr.get('code_quality', {})
-          mem = sr.get('memory', {})
-          bld = sr.get('build', {})
-          af  = sr.get('autofix', {})
-          lines = [
-            "## AI Agent Analysis Report", "",
-            "| Agent | Result |", "|-------|--------|",
-            f"| Code Review | {cod.get('score','N/A')}/10 |",
-            f"| Security    | {sec.get('score','N/A')}/10 — {sec.get('cves',0)} CVE(s) |",
-            f"| Build       | {bld.get('status','?')} |",
-            f"| Memory      | Flash: {mem.get('flash_pct','N/A (no build size report)')}% |",
-            f"| AutoFix     | {af.get('patches_generated',0)} patch(es) generated |",
-            f"| **Overall** | **{'PASSED' if s.get('pipeline_passed') else 'ISSUES'}** |",
-          ]
-          with open(os.environ.get('GITHUB_STEP_SUMMARY','/dev/null'), 'a') as f:
-            f.write("\n".join(lines) + "\n")
-          print("\n".join(lines))
-          PYEOF
+          SUMMARY_FILE="${{ env.REPORTS_DIR }}/pipeline-summary.json"
+          if [ ! -f "$SUMMARY_FILE" ]; then
+            echo "## AI Agent Analysis — pipeline-summary.json not found" \
+              >> $GITHUB_STEP_SUMMARY
+            exit 0
           fi
 
+          python3 - "$SUMMARY_FILE" << 'SUMMARY_EOF'
+          import json, sys, os
+
+          path = sys.argv[1]
+          with open(path) as f:
+              s = json.load(f)
+
+          sr      = s.get("stage_results", {})
+          sec     = sr.get("security", {})
+          cod     = sr.get("code_quality", {})
+          mem     = sr.get("memory", {})
+          bld     = sr.get("build", {})
+          af      = sr.get("autofix", {})
+          tst     = sr.get("tests", {})
+          fi      = sr.get("fault_injection", {})
+          rel     = sr.get("release", {})
+          passed  = s.get("pipeline_passed", False)
+          agents  = s.get("agents_run", "?")
+          reason  = s.get("block_reason")
+
+          # ── Secrets : vrais vs faux positifs ─────────────────────
+          real_secrets = sec.get("real_secrets", [])
+          n_real       = sec.get("secrets_found", sec.get("secrets", 0))
+          n_fp         = sec.get("secrets_in_patches", 0)
+
+          # ── AutoFix patches detail ────────────────────────────────
+          patches_detail = af.get("patches_detail", [])
+
+          # ── Test cases ────────────────────────────────────────────
+          test_cases = tst.get("test_cases", [])
+
+          out = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null")
+          lines = []
+
+          # Header
+          icon = "✅" if passed else "❌"
+          lines += [
+              f"## {icon} AI Agent Analysis — v{s.get('version','?')} · {s.get('target','?')}",
+              "",
+          ]
+
+          # Block reason box
+          if reason and reason != "none":
+              lines += [
+                  "> [!WARNING]",
+                  f"> **Pipeline blocked** : {reason}",
+                  "",
+              ]
+
+          # ── Tableau principal des agents ──────────────────────────
+          lines += [
+              f"### 🤖 {agents}/8 Agents ran",
+              "",
+              "| Agent | Score / Status | Key info |",
+              "|-------|----------------|----------|",
+              f"| 📝 Code Review  | `{cod.get('quality_score', cod.get('score','N/A'))}/10` "
+              f"| {cod.get('issues', 0)} issue(s) found |",
+              f"| 🔒 Security     | `{sec.get('score','N/A')}/10` "
+              f"| {n_real} real secret(s) · {sec.get('cves',0)} CVE(s)"
+              f"{f' · {n_fp} FP in patches' if n_fp else ''} |",
+              f"| 🔨 Build/Debug  | `{bld.get('status','?')}` | ESP-IDF esp32c3 |",
+              f"| 💾 Memory       | Flash `{mem.get('flash_pct','N/A')}%` | 4MB flash |",
+              f"| ⚡ Fault Inject | `{fi.get('status','not_run')}` "
+              f"| {fi.get('passed',0)}/{fi.get('total',0)} scenarios · "
+              f"Robustness `{fi.get('robustness_score','N/A')}/10` |",
+              f"| 🧪 Test Gen     | `{tst.get('generated',0)} test(s)` "
+              f"| Status: `{tst.get('status','?')}` · "
+              f"{tst.get('passed',0)}/{tst.get('executed',0)} passed |",
+              f"| 🤖 AutoFix      | `{af.get('patches_generated',0)} patch(es)` "
+              f"| {af.get('issues_analyzed',0)} issues analysed · "
+              f"{af.get('manual_count',0)} manual instructions |",
+              f"| 🚀 Release      | `{rel.get('version','?')}` "
+              f"| Canary: `{rel.get('canary_deploy','?')}` |",
+              "",
+          ]
+
+          # ── AutoFix patches detail ────────────────────────────────
+          if patches_detail:
+              lines += [
+                  "### 🔧 AutoFix Patches Generated",
+                  "",
+                  "| # | File | Severity | Method | Description |",
+                  "|---|------|----------|--------|-------------|",
+              ]
+              for i, p in enumerate(patches_detail, 1):
+                  desc = str(p.get("description",""))[:80].replace("|","·")
+                  lines.append(
+                      f"| {i} | `{p.get('file','?').split('/')[-1]}` | "
+                      f"**{p.get('severity','?').upper()}** | "
+                      f"`{p.get('fix_method','?')}` | {desc} |"
+                  )
+              lines += [""]
+
+          # ── Vrais secrets (avec action recommandée) ───────────────
+          if real_secrets:
+              lines += [
+                  "### 🚨 Real Secrets Found in Source Code",
+                  "",
+                  "| Type | File | Line | Action |",
+                  "|------|------|------|--------|",
+              ]
+              for s_item in real_secrets[:5]:
+                  lines.append(
+                      f"| `{s_item.get('type','?')}` | "
+                      f"`{s_item.get('file','?').split('/')[-1]}` | "
+                      f"{s_item.get('line','?')} | "
+                      f"{s_item.get('action', 'rotate immediately')[:60]} |"
+                  )
+              lines += [""]
+
+          # ── Faux positifs (explication) ───────────────────────────
+          if n_fp > 0:
+              lines += [
+                  "> **ℹ️ False Positives Note:** "
+                  f"{n_fp} secret(s) detected in generated `.patch` files. "
+                  "These are false positives — gitleaks is scanning the autofix "
+                  "output patches which contain the old (vulnerable) code as context "
+                  "lines. The actual source code fix is in the patch itself.",
+                  "",
+              ]
+
+          # ── Test cases générés ────────────────────────────────────
+          if test_cases:
+              lines += [
+                  f"### 🧪 {len(test_cases)} Generated Test Cases",
+                  "",
+                  "| Name | Type | Area |",
+                  "|------|------|------|",
+              ]
+              for tc in test_cases[:10]:
+                  lines.append(
+                      f"| `{tc.get('name','?')}` | "
+                      f"{tc.get('type','?')} | "
+                      f"{tc.get('area','?')} |"
+                  )
+              if len(test_cases) > 10:
+                  lines.append(f"| *... {len(test_cases)-10} more* | | |")
+              lines += [
+                  "",
+                  "> Tests will be compiled and executed in **Run 2** "
+                  "(autofix branch CI trigger).",
+                  "",
+              ]
+
+          # ── Closed-loop status ────────────────────────────────────
+          lines += [
+              "### 🔄 Closed-Loop AutoFix Status",
+              "",
+              "| Step | Status |",
+              "|------|--------|",
+              f"| 1. Detect issues | ✅ {af.get('issues_analyzed',0)} issues analysed |",
+              f"| 2. Generate patches | {'✅' if af.get('patches_generated',0)>0 else 'ℹ️'} "
+              f"{af.get('patches_generated',0)} patch(es) |",
+              f"| 3. Open PR (Stage 4c) | {'⏳ Triggered by this run' if af.get('patches_generated',0)>0 else 'ℹ️ No patches needed'} |",
+              f"| 4. Re-run (Run 2) | ⏳ Pending |",
+              f"| 5. Re-test | ⏳ Pending |",
+              "",
+              "---",
+              f"*{agents}/8 AI agents · Groq llama-3.3-70b-versatile · "
+              f"[Full reports in artifact `ai-agent-reports-esp32c3`]*",
+          ]
+
+          with open(out, "a") as f:
+              f.write("\n".join(lines) + "\n")
+
+          print("GitHub Step Summary written successfully")
+          SUMMARY_EOF
+
+      # ════════════════════════════════════════════════════════════
+      # ✅ UPDATED STEP v5 — Post AI Results as PR Comment
+      # FIX: reads pr-comment-body.md from orchestrator if available
+      #      (already formatted with real secrets vs FP separation),
+      #      falls back to JSON with richer fields, truncates safely.
+      # ════════════════════════════════════════════════════════════
       - name: Post AI Results as PR Comment
         if: github.event_name == 'pull_request' && always()
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const f  = `${process.env.REPORTS_DIR}/pipeline-summary.json`;
+            // Prefer pr-comment-body.md generated by the orchestrator
+            // (contains real secrets vs false positives separation)
+            const mdPath   = `${process.env.REPORTS_DIR}/pr-comment-body.md`;
+            const jsonPath = `${process.env.REPORTS_DIR}/pipeline-summary.json`;
+
             let body = "## AI Agent Analysis\n\n";
             try {
-              const s  = JSON.parse(fs.readFileSync(f, 'utf8'));
-              const sr = s.stage_results || {};
-              body += `**Overall:** ${s.pipeline_passed ? 'PASSED' : 'ISSUES DETECTED'}\n\n`;
-              body += `| Agent | Result |\n|-------|--------|\n`;
-              body += `| Code Review | ${sr.code_quality?.score ?? 'N/A'}/10 |\n`;
-              body += `| Security    | ${sr.security?.score ?? 'N/A'}/10 |\n`;
-              body += `| Build       | ${sr.build?.status ?? '?'} |\n`;
-              body += `| Memory      | Flash: ${sr.memory?.flash_pct ?? '?'}% |\n`;
-              body += `| AutoFix     | ${sr.autofix?.patches_generated ?? 0} patch(es) |\n`;
-              body += `\n*Generated by AI agents — Groq llama-3.3-70b-versatile*`;
-            } catch(e) { body += `Not available: ${e.message}`; }
+              if (fs.existsSync(mdPath)) {
+                body = fs.readFileSync(mdPath, 'utf8');
+              } else {
+                // Fallback to JSON with richer fields
+                const s  = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+                const sr = s.stage_results || {};
+                const sec = sr.security     || {};
+                const af  = sr.autofix      || {};
+                const cod = sr.code_quality || {};
+                const tst = sr.tests        || {};
+                body += `**Overall:** ${s.pipeline_passed ? '✅ PASSED' : '❌ BLOCKED'}\n\n`;
+                if (s.block_reason) body += `> ⚠️ ${s.block_reason}\n\n`;
+                body += `| Agent | Result |\n|-------|--------|\n`;
+                body += `| Code Review | ${cod.quality_score ?? cod.score ?? 'N/A'}/10 |\n`;
+                body += `| Security    | ${sec.score ?? 'N/A'}/10 · ${sec.secrets_found ?? sec.secrets ?? 0} real secret(s) |\n`;
+                body += `| AutoFix     | ${af.patches_generated ?? 0} patch(es) |\n`;
+                body += `| Tests       | ${tst.generated ?? 0} generated · ${tst.passed ?? 0}/${tst.executed ?? 0} passed |\n`;
+                body += `\n*${s.agents_run ?? '?'}/8 AI agents · Groq llama-3.3-70b-versatile*`;
+              }
+            } catch(e) {
+              body += `Analysis not available: ${e.message}`;
+            }
+
+            // Truncate if > 65,000 chars (GitHub PR comment limit)
+            if (body.length > 65000) {
+              body = body.slice(0, 64800) + '\n\n*[truncated — see full artifact]*';
+            }
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo:  context.repo.repo,
@@ -1391,6 +1583,7 @@ jobs:
             ${{ env.REPORTS_DIR }}/regression-report.json
             ${{ env.REPORTS_DIR }}/run-history.json
           retention-days: 90
+
 # ════════════════════════════════════════════════════════════════════
 # STAGE 4b — APPLY AUTOFIX PATCHES & REBUILD
 # ════════════════════════════════════════════════════════════════════
@@ -1398,7 +1591,6 @@ jobs:
     name: Stage 4b — Apply AutoFix Patches & Rebuild
     runs-on: ubuntu-latest
     needs: ai-agents
-    # Tourne sur main et develop quand ai-agents a réussi
     if: |
       needs.ai-agents.result == 'success' &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
@@ -1488,8 +1680,8 @@ jobs:
               if [ -f \"\$TEST_CPP\" ]; then
                 mkdir -p \"\$ESP_TEST/main\"
                 cp \"\$TEST_CPP\" \"\$ESP_TEST/main/test_light_app_esp32c3.cpp\"
-                printf 'cmake_minimum_required(VERSION 3.16)\\ninclude(\$ENV{IDF_PATH}/tools/cmake/project.cmake)\\nproject(light_test)\\n' > \"\$ESP_TEST/CMakeLists.txt\"
-                printf 'idf_component_register(\\n    SRCS \"test_light_app_esp32c3.cpp\"\\n    INCLUDE_DIRS \".\"\\n    REQUIRES unity esp_system\\n)\\n' > \"\$ESP_TEST/main/CMakeLists.txt\"
+                printf 'cmake_minimum_required(VERSION 3.16)\ninclude(\$ENV{IDF_PATH}/tools/cmake/project.cmake)\nproject(light_test)\n' > \"\$ESP_TEST/CMakeLists.txt\"
+                printf 'idf_component_register(\n    SRCS \"test_light_app_esp32c3.cpp\"\n    INCLUDE_DIRS \".\"\n    REQUIRES unity esp_system\n)\n' > \"\$ESP_TEST/main/CMakeLists.txt\"
                 echo 'Test file deployed'
               fi
 
@@ -1544,8 +1736,6 @@ jobs:
 # ════════════════════════════════════════════════════════════════════
 # STAGE SYNC — Copy ESP-Matter source into repo (run once manually)
 # Triggered by: workflow_dispatch with reason="sync-esp-matter-source"
-# After this job, esp-matter/examples/light/main/ exists in the repo
-# and Stage 4c can apply patches directly without Docker.
 # ════════════════════════════════════════════════════════════════════
   sync-esp-matter-source:
     name: Sync — Copy ESP-Matter source into repo
@@ -1578,12 +1768,12 @@ jobs:
               SRC='/opt/espressif/esp-matter/examples/light/main'
               DEST='/workspace/esp-matter/examples/light/main'
               echo 'Files in container:'
-              ls \"\\$SRC\"
-              cp -r \"\\$SRC\"/* \"\\$DEST\"/
+              ls \"\$SRC\"
+              cp -r \"\$SRC\"/* \"\$DEST\"/
               cp /opt/espressif/esp-matter/examples/light/CMakeLists.txt \
                  /workspace/esp-matter/examples/light/ 2>/dev/null || true
               echo 'Done. Files copied:'
-              ls \"\\$DEST\"
+              ls \"\$DEST\"
             "
 
           echo "=== Files copied ==="
@@ -1647,15 +1837,12 @@ jobs:
           echo "Stage 4c will now work on next pipeline run."
 
 # ════════════════════════════════════════════════════════════════════
-# STAGE 4c — OPTION C : FULL SECOND RUN (push branche autofix)
-# Déclenche un pipeline CI COMPLET avec agents AI sur le code patché
-# Nécessite le secret PAT_TOKEN (repo + workflow permissions)
+# STAGE 4c — FULL SECOND RUN (push branche autofix)
 # ════════════════════════════════════════════════════════════════════
   full-second-run:
     name: Stage 4c — Full Second Run (Option C)
     runs-on: ubuntu-latest
     needs: build-second-run
-    # Lance seulement si rebuild OK, il y avait des patches, et on est sur main
     if: |
       needs.build-second-run.result == 'success' &&
       github.ref == 'refs/heads/main' &&
@@ -1695,7 +1882,6 @@ jobs:
               echo "→ $NAME"
               head -4 "$PATCH" || true
 
-              # Read patch header to detect target file
               PATCH_TARGET=$(head -2 "$PATCH" | grep "^---" | sed 's|^--- a/||')
               echo "  Target: $PATCH_TARGET"
 
@@ -1706,13 +1892,16 @@ jobs:
                 APPLIED=$((APPLIED+1))
 
               # Method 2: patch -p1 with esp-matter dir (for C++ sources)
-              elif [ "$SOURCE_FILES" -gt "0" ] &&                    patch --dry-run -p1 -d esp-matter/examples/light < "$PATCH" 2>/dev/null; then
+              elif [ "$SOURCE_FILES" -gt "0" ] && \
+                   patch --dry-run -p1 -d esp-matter/examples/light < "$PATCH" 2>/dev/null; then
                 patch -p1 -d esp-matter/examples/light < "$PATCH"
                 echo "  OK (esp-matter source)"
                 APPLIED=$((APPLIED+1))
 
               # Method 3: git apply with directory prefix (fallback)
-              elif [ "$SOURCE_FILES" -gt "0" ] &&                    git apply --check -p1                      --directory=esp-matter/examples/light "$PATCH" 2>/dev/null; then
+              elif [ "$SOURCE_FILES" -gt "0" ] && \
+                   git apply --check -p1 \
+                     --directory=esp-matter/examples/light "$PATCH" 2>/dev/null; then
                 git apply -p1 --directory=esp-matter/examples/light "$PATCH"
                 echo "  OK (git apply --directory)"
                 APPLIED=$((APPLIED+1))
@@ -1732,7 +1921,6 @@ jobs:
           if [ -f "$TEST_CPP" ]; then
             mkdir -p esp-matter/examples/light/test
             DEST="esp-matter/examples/light/test/test_light_app_esp32c3.cpp"
-            # Check if content differs before marking as added
             if ! diff -q "$TEST_CPP" "$DEST" > /dev/null 2>&1; then
               cp "$TEST_CPP" "$DEST"
               echo "Test file updated in esp-matter/examples/light/test/"
@@ -1743,7 +1931,7 @@ jobs:
           fi
 
           echo "Result: applied=$APPLIED skipped=$SKIPPED tests=$TESTS_ADDED"
-          echo "applied=$APPLIED"      >> $GITHUB_OUTPUT
+          echo "applied=$APPLIED"         >> $GITHUB_OUTPUT
           echo "tests_added=$TESTS_ADDED" >> $GITHUB_OUTPUT
 
       - name: Créer branche autofix et pusher
@@ -1751,11 +1939,9 @@ jobs:
         if: steps.apply_local.outputs.applied != '0' || steps.apply_local.outputs.tests_added == 'true'
         run: |
           BRANCH="autofix/run-${{ github.run_id }}"
-          # Supprimer la branche distante si elle existe déjà (run relanché)
           git push origin --delete "$BRANCH" 2>/dev/null || true
           git checkout -b "$BRANCH"
 
-          # Copier les rapports importants dans le repo pour traçabilité
           mkdir -p .autofix-reports
           cp ${{ env.REPORTS_DIR }}/autofix-report-esp32c3.json \
              .autofix-reports/ 2>/dev/null || true
@@ -1772,7 +1958,6 @@ jobs:
             exit 0
           fi
 
-          # Compter les patches
           PATCH_COUNT=$(ls ${{ env.REPORTS_DIR }}/patches/*.patch 2>/dev/null | wc -l)
           PATCH_NAMES=$(ls ${{ env.REPORTS_DIR }}/patches/*.patch 2>/dev/null \
             | xargs -I{} basename {} | tr '\n' ' ' || echo "none")
@@ -1784,7 +1969,7 @@ jobs:
           git commit -F /tmp/commit_msg.txt
 
           git push origin "$BRANCH" || git push --force-with-lease origin "$BRANCH"
-          echo "pushed=true"   >> $GITHUB_OUTPUT
+          echo "pushed=true"    >> $GITHUB_OUTPUT
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
           echo "Branch pushed: $BRANCH"
 
@@ -1797,7 +1982,6 @@ jobs:
             const branch = `autofix/run-${{ github.run_id }}`;
             const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
 
-            // Lire le rapport autofix pour les détails
             const fs = require('fs');
             let patches = 0, issues = 0;
             try {
@@ -1850,7 +2034,6 @@ jobs:
               return;
             }
 
-            // Ajouter des labels
             try {
               await github.rest.issues.addLabels({
                 owner:        context.repo.owner,
