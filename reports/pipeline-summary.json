@@ -1,0 +1,51 @@
+{
+  "target": "esp32c3",
+  "version": "v32",
+  "pipeline_passed": true,
+  "errors_found": true,
+  "second_run_ready": true,
+  "stage_results": {
+    "code_quality": {
+      "score": 4,
+      "issues": 0
+    },
+    "security": {
+      "score": 0,
+      "cves": 0,
+      "secrets": 9
+    },
+    "build": {
+      "status": "success"
+    },
+    "memory": {
+      "flash_pct": "N/A"
+    },
+    "tests": {
+      "generated": 4,
+      "deployed": true,
+      "executed": 0,
+      "passed": 0,
+      "failed": 0,
+      "status": "partial"
+    },
+    "fault_injection": {
+      "total": 0,
+      "passed": 0,
+      "status": "not_run",
+      "robustness_score": 7,
+      "dynamic_score": 4
+    },
+    "autofix": {
+      "patches_generated": 1,
+      "patch_files": [
+        "autofix-esp32c3-01-security-demo_intentional_bug.py.patch"
+      ],
+      "issues_analyzed": 13,
+      "status": "patches_generated"
+    },
+    "release": {
+      "version": "v32",
+      "canary_deploy": "simulated"
+    }
+  }
+}
