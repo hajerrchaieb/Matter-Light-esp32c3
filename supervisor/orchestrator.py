@@ -458,6 +458,15 @@ def node_summary(state: PipelineState) -> PipelineState:
         state["pipeline_passed"] = False
     passed = state["pipeline_passed"]
 
+    # ── Security score override : LLM returns 0/10 when no threats exist ──
+    # This happens systematically when Groq has no context showing real threats.
+    # If 0 real secrets AND 0 critical CVEs, the score cannot be 0 — correct it.
+    if isinstance(sec_score, int) and sec_score < 6 and n_real_secrets == 0 and n_cves == 0:
+        corrected = max(sec_score, 7)
+        print(f"[Orchestrator] Security score corrected: {sec_score}/10 → {corrected}/10 "
+              f"(no real secrets, no critical CVEs — LLM score was aberrant)")
+        sec_score = corrected
+
     # ── Block reason (texte lisible pour le dashboard) ────────────
     block_reasons = []
     if n_real_secrets > 0:
