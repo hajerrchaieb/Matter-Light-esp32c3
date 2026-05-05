@@ -1,0 +1,30 @@
+{
+  "status": "partial",
+  "total": 0,
+  "passed": 0,
+  "failed": 0,
+  "ignored": 0,
+  "generated_at": "2026-05-05T12:04:26.816054Z",
+  "runners": {
+    "host": {
+      "runner": "host",
+      "status": "no_tests_yet",
+      "total": 0,
+      "passed": 0,
+      "failed": 0,
+      "note": "No test file present \u2014 Stage AI will generate one this run"
+    },
+    "qemu": {
+      "runner": "qemu",
+      "status": "skipped",
+      "total": 0,
+      "passed": 0,
+      "failed": 0,
+      "note": "QEMU integration skipped (no tests, no QEMU, or build failed)"
+    }
+  },
+  "summary": "host=no_tests_yet qemu=skipped -> canonical=partial (0/0 passed, 0 failed, 0 ignored)",
+  "test_lines": [],
+  "note": "No test file present \u2014 Stage AI will generate one this run",
+  "tests": []
+}
