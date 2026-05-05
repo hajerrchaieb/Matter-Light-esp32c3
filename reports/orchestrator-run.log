@@ -1,0 +1,163 @@
+
+============================================================
+NODE: Code Review Agent
+
+=======================================================
+🔵 CODE REVIEW AGENT — Stage 1
+📁 Source : ../esp-matter/examples/light/main
+🎯 Target : esp32c3
+=======================================================
+  📁 Source found at: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main
+
+📖 Reading source files...
+  ✅ Read: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main/app_main.cpp (11481 chars)
+  ✅ Read: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main/app_driver.cpp (7561 chars)
+  ✅ Read: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main/app_priv.h (3375 chars)
+
+⚡ Reviewing code with Groq...
+
+📋 CODE REVIEW RESULT:
+-------------------------------------------------------
+### CODE QUALITY ISSUES
+
+1. **Complexity**: The code has multiple responsibilities, including Matter protocol handling, LED driver management, and commissioning flow. It would be beneficial to separate these concerns into distinct modules or classes.
+2. **Naming**: Some variable and function names are not descriptive, such as `val`, `handle`, and `app_driver_light_set_power`. More descriptive names would improve code readability.
+3. **Structure**: The code lacks a clear structure, with multiple functions and variables defined in a single file. Consider organizing the code into separate files or modules based on their functionality.
+4. **Comments**: While there are some comments, they are mostly limited to explaining the purpose of the code. Additional comments would be helpful to explain the logic and any complex sections of the code.
+5. **Magic numbers**: The code uses several magic numbers, such as `254`, `360`, and `1000000`. These numbers should be replaced with named constants to improve code readability and maintainability.
+
+### SECURITY ISSUES
+
+1. **Unsafe functions**: The code uses `strcpy` and `strcat`, which are known to be unsafe due to their potential for buffer overflows. Consider using safer alternatives like `strlcpy` and `strlcat`.
+2. **Buffer risks**: The code uses fixed-size buffers, such as `cd_start` and `decryption_key_start`, which can lead to buffer overflows if not properly validated.
+3. **Memory leaks**: The code uses dynamic memory allocation, but it is not clear if the memory is properly freed. Consider using smart pointers or other memory management techniques to prevent memory leaks.
+4. **Hardcoded values**: The code uses hardcoded values, such as `k_timeout_seconds` and `DEFAULT_BRIGHTNESS`. These values should be replaced with configurable options or named constants.
+
+### ESP32 BEST PRACTICES VIOLATIONS
+
+1. **Task stack sizes**: The code does not specify task stack sizes, which can lead to stack overflows. Consider using the `configSTACK_DEPTH_TYPE` configuration option to set the task stack size.
+2. **Heap usage**: The code uses dynamic memory allocation, but it is not clear if the heap is properly managed. Consider using the `heap_caps` API to monitor and manage heap usage.
+3. **ISR safety**: The code does not appear to use ISRs, but if it did, it would be essential to ensure that the ISRs are properly synchronized with the rest of the code.
+4. **Error handling**: The code uses `esp_err_t` checks, but it is not clear if all error paths are properly handled. Consider using a more comprehensive error handling strategy.
+
+### ESP-MATTER SPECIFIC ISSUES
+
+1. **Attribute handling**: The code uses Matter attributes, but it is not clear if the attributes are properly validated and handled. Consider using the `esp_matter_attribute` API to manage attributes.
+2. **Cluster configuration**: The code uses Matter clusters, but it is not clear if the clusters are properly configured. Consider using the `esp_matter_cluster` API to manage clusters.
+3. **Commissioning flow**: The code appears to use a commissioning flow, but it is not clear if the flow is properly implemented. Consider using the `esp_matter_commissioning` API to manage the commissioning flow.
+
+### SUGGESTED IMPROVEMENTS
+
+1. **Separate concerns**: Separate the code into distinct modules or classes based on their functionality.
+2. **Use descriptive names**: Use more descriptive variable and function names to improve code readability.
+3. **Use named constants**: Replace magic numbers with named constants to improve code readability and maintainability.
+4. **Implement comprehensive error handling**: Use a more comprehensive error handling strategy to ensure that all error paths are properly handled.
+
+### QUALITY SCORE
+
+Quality Score: 4/10
+
+The code has several quality issues, including complexity, naming, and structure problems. Additionally, there are security concerns, such as the use of unsafe functions and hardcoded values. The code also violates ESP32 best practices, such as not specifying task stack sizes and not properly managing heap usage. Finally, the code has ESP-Matter specific issues, such as attribute handling and cluster configuration problems. To improve the code quality, it is essential to address these issues and implement suggested improvements.
+-------------------------------------------------------
+  ✅ Quality score extracted: 4/10
+
+✅ Report saved: reports/code-review-esp32c3.json
+
+============================================================
+NODE: Security Agent
+
+[Security Agent] Starting analysis for target: esp32c3
+[Security Agent] Deterministic score: 0/10  (unique_secrets=11 critCVE=0 highCVE=0 mutableTag=True slsa=True)
+[Security Agent] Calling Groq LLM...
+[Security Agent] Injected 11 deduplicated secret(s) into report
+[Security Agent] Report saved: reports/security-report-esp32c3.json
+[Security Agent] Done — score=0/10 | CVEs=0 | secrets=11
+
+============================================================
+NODE: Debug Agent
+
+[Debug Agent] Starting analysis for target: esp32c3
+[Debug Agent] Build log truncated to last 6000 chars
+[Debug Agent] Calling Groq LLM...
+[Orchestrator] Debug failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01kkm7qebnem5rq86pdet82bmh` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 100000, Requested 4492. Please try again in 1h4m41.088s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+
+============================================================
+NODE: Fault Analysis Agent
+
+[Fault Analysis Agent] Starting for esp32c3
+[Orchestrator] Fault Analysis failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01kkm7qebnem5rq86pdet82bmh` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 100000, Requested 4025. Please try again in 57m57.6s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+
+============================================================
+NODE: Test Generation Agent
+
+[Test Gen Agent] Starting for target: esp32c3
+[Test Gen Agent] Calling Groq LLM...
+[Orchestrator] TestGen failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01kkm7qebnem5rq86pdet82bmh` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 100000, Requested 6076. Please try again in 1h27m29.664s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+
+============================================================
+NODE: Optimization + Release Agent
+
+[Optimization Agent] Starting for target: esp32c3
+[Optimization Agent] Calling Groq LLM for memory analysis...
+[Orchestrator] Optimization failed: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01kkm7qebnem5rq86pdet82bmh` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 100000, Requested 2817. Please try again in 40m33.888s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+
+============================================================
+NODE: AutoFix Agent
+
+[AutoFix] ===== target:esp32c3 LLM:True =====
+[AutoFix] ESP source dir: esp-matter/examples/light/main
+[AutoFix] Collected: 14 unique issues (0 duplicates dropped) | 11 security · 3 code_review · 0 debug · 0 fault
+[AutoFix] Total issues: 14
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #1: [CRITICAL] Hardcoded generic-api-key detected in autofix-esp32c3-1
+          fichier: demo/intentional_bug.py
+[AutoFix] LLM error: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01kkm7qebnem5rq86pdet82bmh` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 100000, Requested 4739. Please try again in 1h8m14.496s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+          → ✅ patch valide
+          → SAUVEGARDÉ: autofix-esp32c3-01-security-demo_intentional_bug.py.patch [rule_based]
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #2: demo/intentional_bug.py déjà patché → skip doublon
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #3: demo/intentional_bug.py déjà patché → skip doublon
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #4: demo/intentional_bug.py déjà patché → skip doublon
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #5: demo/intentional_bug.py déjà patché → skip doublon
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #6: demo/intentional_bug.py déjà patché → skip doublon
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #7: demo/intentional_bug.py déjà patché → skip doublon
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #8: demo/intentional_bug.py déjà patché → skip doublon
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #9: demo/intentional_bug.py déjà patché → skip doublon
+[AutoFix]   → target: demo/intentional_bug.py (secret issue)
+[AutoFix] #10: demo/intentional_bug.py déjà patché → skip doublon
+[AutoFix] #11: [CRITICAL] Hardcoded generic-api-key detected in qemu_fault_runner
+          fichier: tools/qemu_fault_runner.py
+[AutoFix] LLM error: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01kkm7qebnem5rq86pdet82bmh` service tier `on_demand` on tokens per day (TPD): Limit 100000, Used 99999, Requested 6092. Please try again in 1h27m42.624s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+          → pas de changement — skip
+[AutoFix] #12: pas de fichier cible → manual
+[AutoFix] #13: pas de fichier cible → manual
+[AutoFix] #14: pas de fichier cible → manual
+
+[AutoFix] patches=1 | manual=4
+[AutoFix] Rapport: reports/autofix-report-esp32c3.json
+[Orchestrator] AutoFix: 1 patch(es)
+
+============================================================
+NODE: Pipeline Summary
+[Orchestrator] NOTE: 10 secret(s) in .patch files are false positives (gitleaks scanning its own patch output).
+
+╔══════════════════════════════════════════════════════╗
+║ Code Review : 4/10
+║ Security    : 0/10  CVEs=0  Real secrets=1  FP secrets (patches)=10
+║ Build       : success
+║ Tests       : gen=0  run=0/0  partial
+║ Fault Inject: 9/10  critical_fail
+║ Memory      : Flash N/A%
+║ Robustness  : N/A/10  Dynamic=0/10
+║ AutoFix     : 1 patch(es)  agents=4/8
+║ Overall     : PASSED ✅
+║ Block reason: 1 hardcoded secret(s) found in source code (qemu_fault_runner.py). AutoFix generated 1 patch(es) to fix them. | Code quality score too low: 4/10 (threshold: 5/10).
+╚══════════════════════════════════════════════════════╝
+[Orchestrator] pipeline-summary.json + pr-comment-body.md saved
