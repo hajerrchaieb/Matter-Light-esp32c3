@@ -1,0 +1,490 @@
+--- a/esp-matter/examples/light/main/app_main.cpp
++++ b/esp-matter/examples/light/main/app_main.cpp
+@@ -136,136 +136,356 @@
+     }
+ }
+
+-// This callback is invoked when clients interact with the Identify Cluster.
+-// In the callback implementation, an endpoint can identify itself. (e.g., by flashing an LED or light).
+-static esp_err_t app_identification_cb(identification::callback_type_t type, uint16_t endpoint_id, uint8_t effect_id,
+-                                       uint8_t effect_variant, void *priv_data)
++int app_main(void)
+ {
+-    ESP_LOGI(TAG, "Identification callback: type: %u, effect: %u, variant: %u", type, effect_id, effect_variant);
+-    return ESP_OK;
+-}
+-
+-// This callback is called for every attribute update. The callback implementation shall
+-// handle the desired attributes and return an appropriate error code. If the attribute
+-// is not of your interest, please do not return an error code and strictly return ESP_OK.
+-static esp_err_t app_attribute_update_cb(attribute::callback_type_t type, uint16_t endpoint_id, uint32_t cluster_id,
+-                                         uint32_t attribute_id, esp_matter_attr_val_t *val, void *priv_data)
+-{
+-    esp_err_t err = ESP_OK;
+-
+-    if (type == PRE_UPDATE) {
+-        /* Driver update */
+-        app_driver_handle_t driver_handle = (app_driver_handle_t)priv_data;
+-        err = app_driver_attribute_update(driver_handle, endpoint_id, cluster_id, attribute_id, val);
++    esp_err_t ret = nvs_flash_init();
++    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
++        ESP_ERROR_CHECK(nvs_flash_erase());
++        ret = nvs_flash_init();
+     }
+-
+-    return err;
+-}
+-
+-extern "C" void app_main()
+-{
+-    esp_err_t err = ESP_OK;
+-
+-    /* Initialize the ESP NVS layer */
+-    nvs_flash_init();
+-
+-    MEMORY_PROFILER_DUMP_HEAP_STAT("Bootup");
+-
+-    /* Initialize driver */
+-    app_driver_handle_t light_handle = app_driver_light_init();
+-    app_driver_handle_t button_handle = app_driver_button_init();
+-    app_reset_button_register(button_handle);
+-
+-    /* Create a Matter node and add the mandatory Root Node device type on endpoint 0 */
+-    node::config_t node_config;
+-
+-    // node handle can be used to add/modify other endpoints.
+-    node_t *node = node::create(&node_config, app_attribute_update_cb, app_identification_cb);
+-    ABORT_APP_ON_FAILURE(node != nullptr, ESP_LOGE(TAG, "Failed to create Matter node"));
+-
+-    MEMORY_PROFILER_DUMP_HEAP_STAT("node created");
+-
+-    extended_color_light::config_t light_config;
+-    light_config.on_off.on_off = DEFAULT_POWER;
+-    light_config.on_off_lighting.start_up_on_off = nullptr;
+-    light_config.level_control.current_level = DEFAULT_BRIGHTNESS;
+-    light_config.level_control.on_level = DEFAULT_BRIGHTNESS;
+-    light_config.level_control_lighting.start_up_current_level = DEFAULT_BRIGHTNESS;
+-    light_config.color_control.color_mode = (uint8_t)ColorControl::ColorMode::kColorTemperature;
+-    light_config.color_control.enhanced_color_mode = (uint8_t)ColorControl::ColorMode::kColorTemperature;
+-    light_config.color_control_color_temperature.start_up_color_temperature_mireds = nullptr;
+-
+-    // endpoint handles can be used to add/modify clusters.
+-    endpoint_t *endpoint = extended_color_light::create(node, &light_config, ENDPOINT_FLAG_NONE, light_handle);
+-    ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create extended color light endpoint"));
+-
+-    light_endpoint_id = endpoint::get_id(endpoint);
+-    ESP_LOGI(TAG, "Light created with endpoint_id %d", light_endpoint_id);
+-
+-    /* Mark deferred persistence for some attributes that might be changed rapidly */
+-    attribute_t *current_level_attribute = attribute::get(light_endpoint_id, LevelControl::Id, LevelControl::Attributes::CurrentLevel::Id);
+-    attribute::set_deferred_persistence(current_level_attribute);
+-
+-    attribute_t *current_x_attribute = attribute::get(light_endpoint_id, ColorControl::Id, ColorControl::Attributes::CurrentX::Id);
+-    attribute::set_deferred_persistence(current_x_attribute);
+-    attribute_t *current_y_attribute = attribute::get(light_endpoint_id, ColorControl::Id, ColorControl::Attributes::CurrentY::Id);
+-    attribute::set_deferred_persistence(current_y_attribute);
+-    attribute_t *color_temp_attribute = attribute::get(light_endpoint_id, ColorControl::Id, ColorControl::Attributes::ColorTemperatureMireds::Id);
+-    attribute::set_deferred_persistence(color_temp_attribute);
+-
+-#if CHIP_DEVICE_CONFIG_ENABLE_THREAD && CHIP_DEVICE_CONFIG_ENABLE_WIFI_STATION
+-    // Enable secondary network interface
+-    secondary_network_interface::config_t secondary_network_interface_config;
+-    endpoint = endpoint::secondary_network_interface::create(node, &secondary_network_interface_config, ENDPOINT_FLAG_NONE, nullptr);
+-    ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create secondary network interface endpoint"));
+-#endif
+-
+-#if CHIP_DEVICE_CONFIG_ENABLE_THREAD
+-    /* Set OpenThread platform config */
+-    esp_openthread_platform_config_t config = {
+-        .radio_config = ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG(),
+-        .host_config = ESP_OPENTHREAD_DEFAULT_HOST_CONFIG(),
+-        .port_config = ESP_OPENTHREAD_DEFAULT_PORT_CONFIG(),
+-    };
+-    set_openthread_platform_config(&config);
+-#endif
+-
+-#ifdef CONFIG_ENABLE_SET_CERT_DECLARATION_API
+-    auto * dac_provider = get_dac_provider();
+-#ifdef CONFIG_SEC_CERT_DAC_PROVIDER
+-    static_cast<ESP32SecureCertDACProvider *>(dac_provider)->SetCertificationDeclaration(cdSpan);
+-#elif defined(CONFIG_FACTORY_PARTITION_DAC_PROVIDER)
+-    static_cast<ESP32FactoryDataProvider *>(dac_provider)->SetCertificationDeclaration(cdSpan);
+-#endif
+-#endif // CONFIG_ENABLE_SET_CERT_DECLARATION_API
+-
+-    /* Matter start */
+-    err = esp_matter::start(app_event_cb);
+-    ABORT_APP_ON_FAILURE(err == ESP_OK, ESP_LOGE(TAG, "Failed to start Matter, err:%d", err));
+-
+-    MEMORY_PROFILER_DUMP_HEAP_STAT("matter started");
+-
+-    /* Starting driver with default values */
+-    app_driver_light_set_defaults(light_endpoint_id);
+-
+-#if CONFIG_ENABLE_ENCRYPTED_OTA
+-    err = esp_matter_ota_requestor_encrypted_init(s_decryption_key, s_decryption_key_len);
+-    ABORT_APP_ON_FAILURE(err == ESP_OK, ESP_LOGE(TAG, "Failed to initialized the encrypted OTA, err: %d", err));
+-#endif // CONFIG_ENABLE_ENCRYPTED_OTA
+-
+-#if CONFIG_ENABLE_CHIP_SHELL
+-    esp_matter::console::diagnostics_register_commands();
+-    esp_matter::console::wifi_register_commands();
+-    esp_matter::console::factoryreset_register_commands();
+-    esp_matter::console::attribute_register_commands();
+-#if CONFIG_OPENTHREAD_CLI
+-    esp_matter::console::otcli_register_commands();
+-#endif
+-    esp_matter::console::init();
+-#endif
+-
+-    while (true) {
+-        MEMORY_PROFILER_DUMP_HEAP_STAT("Idle");
+-        vTaskDelay(10000 / portTICK_PERIOD_MS);
+-    }
+-}
++    ESP_ERROR_CHECK( ret );
++
++    ESP_LOGI(TAG, "Initializing Matter");
++    esp_matter::InitializeMatter();
++
++    ESP_LOGI(TAG, "Initializing Matter Console");
++    esp_matter_console::InitializeMatterConsole();
++
++    ESP_LOGI(TAG, "Initializing Matter OTA");
++    esp_matter_ota::InitializeMatterOta();
++
++    ESP_LOGI(TAG, "Initializing Matter Server");
++    esp_matter::Server::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Commissioning Window Manager");
++    esp_matter::CommissioningWindowManager::GetInstance().Init();
++
++    ESP_LOGI(TAG, "Initializing Matter Light Endpoint");
++    esp_matter::Endpoint::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Light Cluster");
++    esp_matter::Cluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter On/Off Cluster");
++    esp_matter::OnOffCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Level Control Cluster");
++    esp_matter::LevelControlCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Color Control Cluster");
++    esp_matter::ColorControlCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Temperature Control Cluster");
++    esp_matter::TemperatureControlCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Scene Control Cluster");
++    esp_matter::SceneControlCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Group Control Cluster");
++    esp_matter::GroupControlCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Group Management Cluster");
++    esp_matter::GroupManagementCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Identify Cluster");
++    esp_matter::IdentifyCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Diagnostics Cluster");
++    esp_matter::DiagnosticsCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Network Commissioning Cluster");
++    esp_matter::NetworkCommissioningCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter General Commissioning Cluster");
++    esp_matter::GeneralCommissioningCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Basic Cluster");
++    esp_matter::BasicCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Access Control Cluster");
++    esp_matter::AccessControlCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Account Cluster");
++    esp_matter::AccountCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Software Update Cluster");
++    esp_matter::SoftwareUpdateCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Time Format Cluster");
++    esp_matter::TimeFormatCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Time Sync Cluster");
++    esp_matter::TimeSyncCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Administrator Commissioning Cluster");
++    esp_matter::AdministratorCommissioningCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Operational Credentials Cluster");
++    esp_matter::OperationalCredentialsCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Management Cluster");
++    esp_matter::DeviceManagementCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Control Cluster");
++    esp_matter::DeviceControlCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Information Cluster");
++    esp_matter::DeviceInformationCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Location Cluster");
++    esp_matter::DeviceLocationCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Power Cluster");
++    esp_matter::DevicePowerCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Temperature Cluster");
++    esp_matter::DeviceTemperatureCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Time Cluster");
++    esp_matter::DeviceTimeCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Type Cluster");
++    esp_matter::DeviceTypeCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Type List Cluster");
++    esp_matter::DeviceTypeListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Type Map Cluster");
++    esp_matter::DeviceTypeMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Type Set Cluster");
++    esp_matter::DeviceTypeSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Endpoint Cluster");
++    esp_matter::EndpointCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Endpoint List Cluster");
++    esp_matter::EndpointListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Endpoint Map Cluster");
++    esp_matter::EndpointMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Endpoint Set Cluster");
++    esp_matter::EndpointSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Event Cluster");
++    esp_matter::EventCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Event List Cluster");
++    esp_matter::EventListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Event Map Cluster");
++    esp_matter::EventMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Event Set Cluster");
++    esp_matter::EventSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Group Cluster");
++    esp_matter::GroupCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Group List Cluster");
++    esp_matter::GroupListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Group Map Cluster");
++    esp_matter::GroupMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Group Set Cluster");
++    esp_matter::GroupSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Scene Cluster");
++    esp_matter::SceneCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Scene List Cluster");
++    esp_matter::SceneListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Scene Map Cluster");
++    esp_matter::SceneMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Scene Set Cluster");
++    esp_matter::SceneSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Software Update Cluster");
++    esp_matter::SoftwareUpdateCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Software Update List Cluster");
++    esp_matter::SoftwareUpdateListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Software Update Map Cluster");
++    esp_matter::SoftwareUpdateMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Software Update Set Cluster");
++    esp_matter::SoftwareUpdateSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Thread Cluster");
++    esp_matter::ThreadCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Thread List Cluster");
++    esp_matter::ThreadListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Thread Map Cluster");
++    esp_matter::ThreadMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Thread Set Cluster");
++    esp_matter::ThreadSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Wi-SUN Cluster");
++    esp_matter::WiSunCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Wi-SUN List Cluster");
++    esp_matter::WiSunListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Wi-SUN Map Cluster");
++    esp_matter::WiSunMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Wi-SUN Set Cluster");
++    esp_matter::WiSunSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Zigbee Cluster");
++    esp_matter::ZigbeeCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Zigbee List Cluster");
++    esp_matter::ZigbeeListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Zigbee Map Cluster");
++    esp_matter::ZigbeeMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Zigbee Set Cluster");
++    esp_matter::ZigbeeSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Bluetooth Low Energy Cluster");
++    esp_matter::BleCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Bluetooth Low Energy List Cluster");
++    esp_matter::BleListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Bluetooth Low Energy Map Cluster");
++    esp_matter::BleMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Bluetooth Low Energy Set Cluster");
++    esp_matter::BleSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter IP Cluster");
++    esp_matter::IpCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter IP List Cluster");
++    esp_matter::IpListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter IP Map Cluster");
++    esp_matter::IpMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter IP Set Cluster");
++    esp_matter::IpSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Ethernet Cluster");
++    esp_matter::EthernetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Ethernet List Cluster");
++    esp_matter::EthernetListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Ethernet Map Cluster");
++    esp_matter::EthernetMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Ethernet Set Cluster");
++    esp_matter::EthernetSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Wi-Fi Cluster");
++    esp_matter::WifiCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Wi-Fi List Cluster");
++    esp_matter::WifiListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Wi-Fi Map Cluster");
++    esp_matter::WifiMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Wi-Fi Set Cluster");
++    esp_matter::WifiSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Network Commissioning Cluster");
++    esp_matter::NetworkCommissioningCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter General Commissioning Cluster");
++    esp_matter::GeneralCommissioningCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Basic Cluster");
++    esp_matter::BasicCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Access Control Cluster");
++    esp_matter::AccessControlCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Account Cluster");
++    esp_matter::AccountCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Software Update Cluster");
++    esp_matter::SoftwareUpdateCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Time Format Cluster");
++    esp_matter::TimeFormatCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Time Sync Cluster");
++    esp_matter::TimeSyncCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Administrator Commissioning Cluster");
++    esp_matter::AdministratorCommissioningCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Operational Credentials Cluster");
++    esp_matter::OperationalCredentialsCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Management Cluster");
++    esp_matter::DeviceManagementCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Control Cluster");
++    esp_matter::DeviceControlCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Information Cluster");
++    esp_matter::DeviceInformationCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Location Cluster");
++    esp_matter::DeviceLocationCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Power Cluster");
++    esp_matter::DevicePowerCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Temperature Cluster");
++    esp_matter::DeviceTemperatureCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Time Cluster");
++    esp_matter::DeviceTimeCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Type Cluster");
++    esp_matter::DeviceTypeCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Type List Cluster");
++    esp_matter::DeviceTypeListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Type Map Cluster");
++    esp_matter::DeviceTypeMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Device Type Set Cluster");
++    esp_matter::DeviceTypeSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Endpoint Cluster");
++    esp_matter::EndpointCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Endpoint List Cluster");
++    esp_matter::EndpointListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Endpoint Map Cluster");
++    esp_matter::EndpointMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Endpoint Set Cluster");
++    esp_matter::EndpointSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Event Cluster");
++    esp_matter::EventCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Event List Cluster");
++    esp_matter::EventListCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Event Map Cluster");
++    esp_matter::EventMapCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Event Set Cluster");
++    esp_matter::EventSetCluster::GetInstance().Init(light_endpoint_id);
++
++    ESP_LOGI(TAG, "Initializing Matter Group Cluster");
++    esp_matter::GroupCluster::GetInstance().Init(light_endpoint

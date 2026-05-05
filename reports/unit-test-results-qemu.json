@@ -1,0 +1,8 @@
+{
+  "runner": "qemu",
+  "status": "skipped",
+  "total": 0,
+  "passed": 0,
+  "failed": 0,
+  "note": "QEMU integration skipped (no tests, no QEMU, or build failed)"
+}
