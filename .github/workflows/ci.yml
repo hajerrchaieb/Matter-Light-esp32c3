@@ -410,6 +410,19 @@ jobs:
           path: ${{ env.FIRMWARE_DIR }}/esp32c3/
 
       # ─────────────────────────────────────────────────────────────
+      # Download AI agent reports so generated_tests_esp32c3.cpp
+      # is available BEFORE "Find or generate test file" runs.
+      # This is critical for Run 2: the test file was produced by
+      # the Test-Gen agent in Run 1 and uploaded in ai-agent-reports.
+      # ─────────────────────────────────────────────────────────────
+      - name: Download AI agent reports (for generated tests)
+        uses: actions/download-artifact@v4
+        with:
+          name: ai-agent-reports-esp32c3
+          path: ${{ env.REPORTS_DIR }}/
+        continue-on-error: true
+
+      # ─────────────────────────────────────────────────────────────
       # Test path A — Host-side fast unit tests
       # ─────────────────────────────────────────────────────────────
       # Generated tests are compiled with g++ against the small mock
