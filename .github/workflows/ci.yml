@@ -898,7 +898,7 @@ jobs:
           print(f"Fuzzer gate passed — 0 crashes in {r.get('executions',0):,} executions")
           PYEOF
 
-      - name: Upload test & quality reports
+      - name: Upload test & quality reports (Stage 5)
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -918,8 +918,8 @@ jobs:
             ${{ env.REPORTS_DIR }}/fuzz-raw.log
             ${{ env.REPORTS_DIR }}/fuzz-report-esp32c3.json
             ${{ env.REPORTS_DIR }}/fuzz-build.log
+            ${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json
           retention-days: 30
-
 # ════════════════════════════════════════════════════════════════════
 # STAGE 6 — FIRMWARE SECURITY AUDIT
 # ════════════════════════════════════════════════════════════════════
@@ -1067,13 +1067,12 @@ jobs:
           path: ${{ env.REPORTS_DIR }}/
         continue-on-error: true
 
-      - name: Download test reports (Stage 5)
+      - name: Download test reports (Stage 5) for AI agents
         uses: actions/download-artifact@v4
         with:
           name: test-reports-esp32c3
           path: ${{ env.REPORTS_DIR }}/
         continue-on-error: true
-
       - name: Download firmware audit (Stage 6)
         uses: actions/download-artifact@v4
         with:
@@ -1552,7 +1551,7 @@ jobs:
           path: ${{ env.REPORTS_DIR }}/orchestrator-run.log
           retention-days: 30
 
-      - name: Upload AI agent reports (includes patches + tests)
+      - name: Upload AI agent reports (ALL reports for dashboard)
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -1568,13 +1567,24 @@ jobs:
             ${{ env.REPORTS_DIR }}/autofix-report-esp32c3.json
             ${{ env.REPORTS_DIR }}/release-report-esp32c3.json
             ${{ env.REPORTS_DIR }}/pipeline-summary.json
+            ${{ env.REPORTS_DIR }}/regression-report.json
+            ${{ env.REPORTS_DIR }}/run-history.json
             ${{ env.REPORTS_DIR }}/orchestrator-run.log
             ${{ env.REPORTS_DIR }}/qemu-dynamic-report.json
+            ${{ env.REPORTS_DIR }}/unit-test-results.json
+            ${{ env.REPORTS_DIR }}/unit-test-results-host.json
+            ${{ env.REPORTS_DIR }}/unit-test-results-qemu.json
+            ${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json
+            ${{ env.REPORTS_DIR }}/fuzz-report-esp32c3.json
             ${{ env.REPORTS_DIR }}/test-deploy-manifest.json
             ${{ env.REPORTS_DIR }}/patches/
           retention-days: 90
 
-      - name: Upload regression history
+      # ── Upload regression history séparé (pour persistance cross-runs)
+      # Cet artifact est téléchargé au DÉBUT du job ai-agents
+      # pour fournir l'historique au regression_detector.
+      # Il est aussi présent dans ai-agent-reports pour le dashboard.
+      - name: Upload regression history (cross-run persistence)
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -1583,7 +1593,6 @@ jobs:
             ${{ env.REPORTS_DIR }}/regression-report.json
             ${{ env.REPORTS_DIR }}/run-history.json
           retention-days: 90
-
 # ════════════════════════════════════════════════════════════════════
 # STAGE 4b — APPLY AUTOFIX PATCHES & REBUILD
 # ════════════════════════════════════════════════════════════════════
