@@ -961,30 +961,12 @@ jobs:
 
           # Always produce a valid JSON report (fallback if script failed/missing)
           if [ ! -f "${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json" ]; then
-            python3 -c "
-import json
-json.dump({
-  'target': 'esp32c3',
-  'total_scenarios': 0,
-  'passed': 0,
-  'failed': 0,
-  'overall_status': 'not_run',
-  'critical_failures': [],
-  'high_failures': [],
-  'by_family': {},
-  'scenarios': [],
-  'summary': 'Fault injection not run — tools/fault_injector.py missing or no ELF available.'
-}, open('${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json', 'w'), indent=2)
-"
+            python3 -c "import json; json.dump({'target':'esp32c3','total_scenarios':0,'passed':0,'failed':0,'overall_status':'not_run','critical_failures':[],'high_failures':[],'by_family':{},'scenarios':[],'summary':'Fault injection not run.'}, open('${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json','w'), indent=2)" 
             echo "Fallback fault-injection report written"
           fi
 
           # Show summary
-          python3 -c "
-import json
-d = json.load(open('${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json'))
-print(f\"Fault injection: {d.get('passed',0)}/{d.get('total_scenarios',0)} passed | status={d.get('overall_status','?')}\")
-" 2>/dev/null || true
+          python3 -c "import json; d=json.load(open('${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json')); print('Fault injection: '+str(d.get('passed',0))+'/'+str(d.get('total_scenarios',0))+' passed | status='+str(d.get('overall_status','?')))" 2>/dev/null || true
 
       - name: Upload test & quality reports
         uses: actions/upload-artifact@v4
