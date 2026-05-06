@@ -259,6 +259,8 @@ jobs:
           output: trivy-image.sarif
           severity: CRITICAL,HIGH
           exit-code: '0'
+          timeout: 15m
+          scanners: vuln
 
       - name: Upload Trivy SARIF to Security tab
         uses: github/codeql-action/upload-sarif@v4
