@@ -259,8 +259,6 @@ jobs:
           output: trivy-image.sarif
           severity: CRITICAL,HIGH
           exit-code: '0'
-          timeout: 15m
-          scanners: vuln
 
       - name: Upload Trivy SARIF to Security tab
         uses: github/codeql-action/upload-sarif@v4
@@ -412,17 +410,37 @@ jobs:
           path: ${{ env.FIRMWARE_DIR }}/esp32c3/
 
       # ─────────────────────────────────────────────────────────────
-      # Download AI agent reports so generated_tests_esp32c3.cpp
-      # is available BEFORE "Find or generate test file" runs.
-      # This is critical for Run 2: the test file was produced by
-      # the Test-Gen agent in Run 1 and uploaded in ai-agent-reports.
+      # Download generated test file from the PREVIOUS run.
+      # Strategy:
+      #   Run 1 (main): no artifact exists yet → step skipped → Stage AI generates tests
+      #   Run 2 (autofix/run-X): downloads from Run 1 (the first_run_id in branch name)
+      #   Run 3+: tries to find the most recent ai-agent-reports artifact
+      #
+      # Uses gh CLI (pre-installed on ubuntu-latest runners) with GITHUB_TOKEN.
+      # continue-on-error: true so Run 1 never fails here.
       # ─────────────────────────────────────────────────────────────
-      - name: Download AI agent reports (for generated tests)
-        uses: actions/download-artifact@v4
-        with:
-          name: ai-agent-reports-esp32c3
-          path: ${{ env.REPORTS_DIR }}/
+      - name: Download generated tests from previous run (Run 2 critical)
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p ${{ env.REPORTS_DIR }}
+          BRANCH="${{ github.ref_name }}"
+          TARGET_RUN=""
+          # If this is an autofix branch (Run 2), extract Run 1 ID from branch name
+          if echo "$BRANCH" | grep -qE "^autofix/run-[0-9]+$"; then
+            TARGET_RUN=$(echo "$BRANCH" | sed 's/autofix\/run-//')
+            echo "Run 2 detected — will download ai-agent-reports from Run 1: $TARGET_RUN"
+          else
+            # For Run 1 or other branches: find most recent completed run (not current)
+            TARGET_RUN=$(gh api               "repos/${{ github.repository }}/actions/workflows/${{ env.WORKFLOW_FILE }}/runs?status=completed&per_page=10"               --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }})][0].id"               2>/dev/null || echo "")
+            echo "Run 1 — most recent previous run: ${TARGET_RUN:-none}"
+          fi
+          if [ -n "$TARGET_RUN" ] && [ "$TARGET_RUN" != "null" ]; then
+            gh run download "$TARGET_RUN"               --name ai-agent-reports-esp32c3               --dir "${{ env.REPORTS_DIR }}/"               2>/dev/null               && echo "Downloaded ai-agent-reports from run $TARGET_RUN"               || echo "No ai-agent-reports artifact in run $TARGET_RUN — Stage AI will generate tests this run"
+          else
+            echo "No previous run found — this is the first run, Stage AI will generate tests"
+          fi
 
       # ─────────────────────────────────────────────────────────────
       # Test path A — Host-side fast unit tests
@@ -515,26 +533,16 @@ jobs:
 
 
       - name: Install Espressif QEMU for ESP32-C3
-        continue-on-error: true
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y libsdl2-2.0-0 libslirp0 libglib2.0-0
           QEMU_URL="https://github.com/espressif/qemu/releases/download/esp-develop-9.2.2-20250228/qemu-riscv32-softmmu-esp_develop_9.2.2_20250228-x86_64-linux-gnu.tar.xz"
-          if curl -sL --fail-with-body "$QEMU_URL" -o qemu-esp.tar.xz 2>/dev/null; then
-            mkdir -p /opt/espressif-qemu
-            tar -xf qemu-esp.tar.xz -C /opt/espressif-qemu --strip-components=1
-            echo "/opt/espressif-qemu/bin" >> $GITHUB_PATH
-            if /opt/espressif-qemu/bin/qemu-system-riscv32 --version 2>/dev/null; then
-              echo "QEMU_AVAILABLE=true" >> $GITHUB_ENV
-              echo "QEMU installed and functional"
-            else
-              echo "::warning::QEMU binary not functional"
-              echo "QEMU_AVAILABLE=false" >> $GITHUB_ENV
-            fi
-          else
-            echo "::warning::QEMU download failed — QEMU steps will be skipped"
-            echo "QEMU_AVAILABLE=false" >> $GITHUB_ENV
-          fi
+          curl -sL "$QEMU_URL" -o qemu-esp.tar.xz
+          mkdir -p /opt/espressif-qemu
+          tar -xf qemu-esp.tar.xz -C /opt/espressif-qemu --strip-components=1
+          echo "/opt/espressif-qemu/bin" >> $GITHUB_PATH
+          /opt/espressif-qemu/bin/qemu-system-riscv32 --version
+          echo "QEMU installed"
 
       - name: Install esptool
         run: pip install esptool --quiet
@@ -574,8 +582,7 @@ jobs:
           fi
 
       - name: Run firmware in QEMU (45 second window)
-        if: env.QEMU_SKIP != 'true' && env.QEMU_AVAILABLE != 'false'
-        continue-on-error: true
+        if: env.QEMU_SKIP != 'true'
         run: |
           FW_DIR="${{ env.FIRMWARE_DIR }}/esp32c3"
           mkdir -p ${{ env.REPORTS_DIR }}
@@ -591,8 +598,7 @@ jobs:
             >> ${{ env.REPORTS_DIR }}/qemu-run.log
 
       - name: Parse QEMU UART log
-        if: env.QEMU_SKIP != 'true' && env.QEMU_AVAILABLE != 'false'
-        continue-on-error: true
+        if: env.QEMU_SKIP != 'true'
         run: |
           python3 << 'PYEOF'
           import json, re
@@ -647,8 +653,7 @@ jobs:
           PYEOF
 
       - name: QEMU Quality Gate
-        if: env.QEMU_SKIP != 'true' && env.QEMU_AVAILABLE != 'false'
-        continue-on-error: true
+        if: env.QEMU_SKIP != 'true'
         run: |
           python3 << 'PYEOF'
           import json, sys
