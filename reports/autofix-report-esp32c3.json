@@ -1,0 +1,54 @@
+{
+  "agent": "autofix_agent",
+  "target": "esp32c3",
+  "generated_at": "2026-05-06T11:17:54.968750Z",
+  "llm_used": true,
+  "issues_analyzed": 5,
+  "patches_generated": 2,
+  "patch_files": [
+    "autofix-esp32c3-01-security-tools_qemu_fault_runner.py.patch",
+    "autofix-esp32c3-05-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch"
+  ],
+  "patches_detail": [
+    {
+      "patch_name": "autofix-esp32c3-01-security-tools_qemu_fault_runner.py.patch",
+      "file": "tools/qemu_fault_runner.py",
+      "source_agent": "security",
+      "severity": "critical",
+      "description": "Hardcoded generic-api-key detected in qemu_fault_runner.py line 117. Action: Remove from code, rotate the secret, use env var via os.environ.get('VAR', '')",
+      "fix_method": "llm",
+      "valid": false
+    },
+    {
+      "patch_name": "autofix-esp32c3-05-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch",
+      "file": "esp-matter/examples/light/main/app_main.cpp",
+      "source_agent": "fault_analysis",
+      "severity": "medium",
+      "description": "inadequate stack size or improper recursive function calls",
+      "fix_method": "llm",
+      "valid": false
+    }
+  ],
+  "manual_instructions": [
+    {
+      "source_agent": "code_review",
+      "severity": "high",
+      "description": "1. **Buffer risks**: The code uses `extern` declarations for binary data, such as `cd_start` and `decryption_key_start`. These buffers should be validated to prevent buffer overflows.",
+      "how_to_fix": ""
+    },
+    {
+      "source_agent": "code_review",
+      "severity": "high",
+      "description": "**Memory leaks**: The code uses dynamic memory allocation, but it is not clear if all allocated memory is properly freed. A memory leak detection tool should be used to identify potential issues.",
+      "how_to_fix": ""
+    },
+    {
+      "source_agent": "code_review",
+      "severity": "high",
+      "description": "**Hardcoded values**: The code uses hardcoded values, such as `k_timeout_seconds` and `DEFAULT_BRIGHTNESS`. These values should be configurable or defined as constants to improve maintainability.",
+      "how_to_fix": ""
+    }
+  ],
+  "status": "patches_generated",
+  "summary": "2 patch(es) g\u00e9n\u00e9r\u00e9s | 3 manuels."
+}
