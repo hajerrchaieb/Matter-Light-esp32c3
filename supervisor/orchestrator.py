@@ -330,11 +330,13 @@ def node_test_gen(state: PipelineState) -> PipelineState:
 def node_optimization(state: PipelineState) -> PipelineState:
     print("\n" + "=" * 60 + "\nNODE: Optimization + Release Agent")
     state["current_stage"] = "optimization"
-    try:
-        result = _call_agent_with_retry(run_optimization_agent()
-            target  = state["target"],
-            version = state["version"],
-        )
+
+      try:
+    result = _call_agent_with_retry(
+        run_optimization_agent,
+        target=state["target"],
+        version=state["version"],
+    )
         state["optimization_result"] = result
         for region in ("flash", "dram", "iram"):
             if result.get("memory_usage", {}).get(f"{region}_risk") == "critical":
