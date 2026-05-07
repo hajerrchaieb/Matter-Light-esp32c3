@@ -38,6 +38,7 @@ env:
   EXAMPLE_PATH: esp-matter/examples/light
   FIRMWARE_DIR: firmware
   REPORTS_DIR: reports
+  WORKFLOW_FILE: ci.yml
 
 # ════════════════════════════════════════════════════════════════════
 # STAGE 1 — PLAN & CODE QUALITY
