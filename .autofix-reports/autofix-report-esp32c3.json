@@ -1,0 +1,54 @@
+{
+  "agent": "autofix_agent",
+  "target": "esp32c3",
+  "generated_at": "2026-05-07T10:24:32.383549Z",
+  "llm_used": true,
+  "issues_analyzed": 5,
+  "patches_generated": 2,
+  "patch_files": [
+    "autofix-esp32c3-01-security-tools_qemu_fault_runner.py.patch",
+    "autofix-esp32c3-05-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch"
+  ],
+  "patches_detail": [
+    {
+      "patch_name": "autofix-esp32c3-01-security-tools_qemu_fault_runner.py.patch",
+      "file": "tools/qemu_fault_runner.py",
+      "source_agent": "security",
+      "severity": "critical",
+      "description": "Hardcoded generic-api-key detected in qemu_fault_runner.py line 117. Action: Remove from code, rotate the secret, use env var via os.environ.get('VAR', '')",
+      "fix_method": "llm",
+      "valid": false
+    },
+    {
+      "patch_name": "autofix-esp32c3-05-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch",
+      "file": "esp-matter/examples/light/main/app_main.cpp",
+      "source_agent": "fault_analysis",
+      "severity": "medium",
+      "description": "inadequate stack size or recursive function calls",
+      "fix_method": "llm",
+      "valid": false
+    }
+  ],
+  "manual_instructions": [
+    {
+      "source_agent": "code_review",
+      "severity": "high",
+      "description": "1. **Unsafe functions**: The code uses `strcpy` and `strcat` functions, which can lead to buffer overflows. It's recommended to use safer alternatives like `strlcpy` and `strlcat`.",
+      "how_to_fix": ""
+    },
+    {
+      "source_agent": "code_review",
+      "severity": "high",
+      "description": "**Buffer risks**: The code uses fixed-size buffers, such as `cd_start` and `decryption_key_start`. It's essential to ensure that these buffers are large enough to hold the expected data and to check for buffer overflows.",
+      "how_to_fix": ""
+    },
+    {
+      "source_agent": "code_review",
+      "severity": "high",
+      "description": "**Memory leaks**: The code uses dynamic memory allocation, but it's not clear if all allocated memory is properly freed. A thorough review of memory management is necessary to prevent memory leaks.",
+      "how_to_fix": ""
+    }
+  ],
+  "status": "patches_generated",
+  "summary": "2 patch(es) g\u00e9n\u00e9r\u00e9s | 3 manuels."
+}
