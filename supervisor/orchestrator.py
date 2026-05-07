@@ -443,6 +443,12 @@ def node_summary(state: PipelineState) -> PipelineState:
     ut_passed  = _ut.get("passed",  0)
     ut_failed  = _ut.get("failed",  0)
     ut_total   = _ut.get("total",   0)
+    # If tests were generated this run but Stage 5 ran before Stage AI
+    # (which is always the case in Run 1), show "pending_run2" so the
+    # dashboard displays the correct explanation instead of "partial".
+    if n_tests > 0 and ut_total == 0 and ut_status in ("no_tests_yet", "partial", "no_output"):
+        ut_status = "pending_run2"
+        print(f"[Orchestrator] {n_tests} test(s) generated — will execute in Run 2")
 
     # ── Fault injection ───────────────────────────────────────────
     fi_total   = _fi.get("total_scenarios", 0)
