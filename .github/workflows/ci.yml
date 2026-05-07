@@ -459,21 +459,31 @@ jobs:
           TEST_CPP="$TEST_DIR/test_light_app_esp32c3.cpp"
           HAS_TESTS=false
 
+          # Priority 1: file committed directly in repo by Stage 4c
           if [ -f "$TEST_CPP" ]; then
             HAS_TESTS=true
-            echo "Test file found in repo: $TEST_CPP"
+            echo "✓ Test file found in repo: $TEST_CPP"
+
+          # Priority 2: downloaded from previous run artifact (Run 2 path)
           elif [ -f "${{ env.REPORTS_DIR }}/generated_tests_esp32c3.cpp" ]; then
             mkdir -p "$TEST_DIR"
             cp "${{ env.REPORTS_DIR }}/generated_tests_esp32c3.cpp" "$TEST_CPP"
             HAS_TESTS=true
-            echo "Copied generated test from reports/ to $TEST_CPP"
+            echo "✓ Copied generated test from ai-agent-reports artifact"
+
+          # Priority 3: committed via .autofix-reports/ (Stage 4c fallback path)
           elif [ -f ".autofix-reports/generated_tests_esp32c3.cpp" ]; then
             mkdir -p "$TEST_DIR"
             cp ".autofix-reports/generated_tests_esp32c3.cpp" "$TEST_CPP"
             HAS_TESTS=true
-            echo "Copied generated test from .autofix-reports/ to $TEST_CPP"
+            echo "✓ Copied generated test from .autofix-reports/"
+
           else
-            echo "No test file available yet — Stage AI will produce one this run"
+            echo "No test file found in any location — Stage AI will generate one this run"
+            echo "  Checked:"
+            echo "    1. $TEST_CPP"
+            echo "    2. ${{ env.REPORTS_DIR }}/generated_tests_esp32c3.cpp"
+            echo "    3. .autofix-reports/generated_tests_esp32c3.cpp"
           fi
 
           echo "has_tests=$HAS_TESTS"  >> $GITHUB_OUTPUT
@@ -1976,10 +1986,12 @@ jobs:
           if [ -f "$TEST_CPP" ]; then
             mkdir -p esp-matter/examples/light/test
             DEST="esp-matter/examples/light/test/test_light_app_esp32c3.cpp"
-            # Check if content differs before marking as added
-            if ! diff -q "$TEST_CPP" "$DEST" > /dev/null 2>&1; then
+            # FIX: diff -q exits with code 2 when DEST doesn't exist yet,
+            # which bash treats as false → TESTS_ADDED stays false.
+            # Instead: always copy if DEST missing OR content differs.
+            if [ ! -f "$DEST" ] || ! diff -q "$TEST_CPP" "$DEST" > /dev/null 2>&1; then
               cp "$TEST_CPP" "$DEST"
-              echo "Test file updated in esp-matter/examples/light/test/"
+              echo "Test file deployed to esp-matter/examples/light/test/"
               TESTS_ADDED=true
             else
               echo "Test file unchanged — no commit needed"
@@ -2006,6 +2018,13 @@ jobs:
           cp ${{ env.REPORTS_DIR }}/pipeline-summary.json \
              .autofix-reports/pipeline-summary-run-${{ github.run_id }}.json \
              2>/dev/null || true
+          # Also commit the generated test file so Run 2 finds it directly in repo
+          # This is the most reliable path — no artifact download needed
+          if [ -f "${{ env.REPORTS_DIR }}/generated_tests_esp32c3.cpp" ]; then
+            cp ${{ env.REPORTS_DIR }}/generated_tests_esp32c3.cpp \
+               .autofix-reports/generated_tests_esp32c3.cpp 2>/dev/null || true
+            echo "Copied generated tests to .autofix-reports/ for Run 2"
+          fi
           git add -A
 
           STAGED=$(git status --porcelain 2>/dev/null | wc -l)
