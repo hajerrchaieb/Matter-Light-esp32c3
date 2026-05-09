@@ -1,0 +1,77 @@
+{
+  "target": "esp32c3",
+  "robustness_score": 7,
+  "score_justification": "The esp32c3 scored 9/10 in the fault injection tests, with one critical failure in the stack_overflow_trigger scenario. The device handled most of the high-severity tests, but the critical failure in the stack overflow scenario brings the overall score down to 7. The device's ability to handle most of the high-severity tests and reboot in some cases indicates a moderate level of robustness.",
+  "failed_scenarios_analysis": [
+    {
+      "scenario": "stack_overflow_trigger",
+      "family": "memory",
+      "cwe": "CWE-121",
+      "root_cause": "insufficient stack size or lack of stack overflow protection",
+      "fix_code": "increase stack size or implement stack overflow protection mechanisms",
+      "effort": "medium"
+    }
+  ],
+  "passed_scenarios_highlights": [
+    {
+      "scenario": "nvs_magic_corruption",
+      "why_good": "correctly calls nvs_flash_erase() to handle corruption"
+    },
+    {
+      "scenario": "nvs_write_interrupted",
+      "why_good": "properly handles interrupted NVS writes with a reboot"
+    },
+    {
+      "scenario": "matter_onoff_invalid_value",
+      "why_good": "correctly handles invalid values in the Matter protocol"
+    }
+  ],
+  "family_assessments": {
+    "memory": {
+      "score": 6,
+      "verdict": "NEEDS_IMPROVEMENT",
+      "top_recommendation": "Implement stack overflow protection mechanisms and increase stack size where necessary"
+    },
+    "nvs": {
+      "score": 8,
+      "verdict": "GOOD",
+      "top_recommendation": "Continue to properly handle NVS corruption and interrupted writes"
+    },
+    "matter": {
+      "score": 7,
+      "verdict": "ACCEPTABLE",
+      "top_recommendation": "Improve error handling for invalid values in the Matter protocol"
+    }
+  },
+  "priority_fixes": [
+    "1. [CRITICAL] Fix stack overflow trigger by increasing stack size or implementing stack overflow protection mechanisms",
+    "2. [HIGH] Improve error handling for invalid values in the Matter protocol",
+    "3. [MEDIUM] Refactor code to separate concerns and improve readability"
+  ],
+  "overall_verdict": "NEEDS_IMPROVEMENT",
+  "summary": "The esp32c3 demonstrated moderate robustness in fault injection tests, with one critical failure in the stack overflow scenario. While the device handled most high-severity tests, improvements are needed in memory management and error handling. Priority fixes include addressing the stack overflow issue and improving error handling in the Matter protocol.",
+  "fault_runner_summary": {
+    "total": 10,
+    "passed": 9,
+    "failed": 1,
+    "status": "critical_fail",
+    "by_family": {
+      "memory": {
+        "total": 4,
+        "passed": 3,
+        "failed": 1
+      },
+      "nvs": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      },
+      "matter": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      }
+    }
+  },
+  "analysis_timestamp": "2026-05-09T11:01:33.997122"
+}
