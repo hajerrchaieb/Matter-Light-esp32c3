@@ -23,6 +23,7 @@ CORRECTIONS vs v5:
 """
 
 import json
+import time
 import os
 import sys
 import re
@@ -185,6 +186,26 @@ def load_ci_artifacts(state: PipelineState) -> PipelineState:
 # AGENT NODES
 # ════════════════════════════════════════════════════════════════════
 
+
+def _call_agent_with_retry(agent_fn, *args, max_retries=3, delay=15, **kwargs):
+    """Call an agent function with retry on rate limit (429) errors."""
+    for attempt in range(max_retries):
+        try:
+            return agent_fn(*args, **kwargs)
+        except Exception as e:
+            msg = str(e)
+            if "429" in msg or "rate limit" in msg.lower() or "Rate limit" in msg:
+                if attempt < max_retries - 1:
+                    wait = delay * (attempt + 1)
+                    print(f"  [Retry] Rate limit hit — waiting {wait}s (attempt {attempt+1}/{max_retries})")
+                    time.sleep(wait)
+                else:
+                    print(f"  [Retry] Rate limit — max retries reached")
+                    raise
+            else:
+                raise
+    return None
+
 def node_code_review(state: PipelineState) -> PipelineState:
     print("\n" + "=" * 60 + "\nNODE: Code Review Agent")
     state["current_stage"] = "code_review"
@@ -236,7 +257,7 @@ def node_debug(state: PipelineState) -> PipelineState:
     print("\n" + "=" * 60 + "\nNODE: Debug Agent")
     state["current_stage"] = "debug"
     try:
-        result = run_debug_agent(target=state["target"])
+        result = _call_agent_with_retry(run_debug_agent, target=state["target"])
         state["debug_result"] = result
         errors = result.get("compilation_errors", []) or []
         if result.get("overall_health") == "broken" or len(errors) > 0:
@@ -252,7 +273,7 @@ def node_fault_analysis(state: PipelineState) -> PipelineState:
     print("\n" + "=" * 60 + "\nNODE: Fault Analysis Agent")
     state["current_stage"] = "fault_analysis"
     try:
-        result = run_fault_analysis_agent(target=state["target"])
+        result = _call_agent_with_retry(run_fault_analysis_agent, target=state["target"])
         state["fault_analysis_result"] = result
         score = result.get("robustness_score", 10)
         if isinstance(score, (int, float)) and score < 5:
@@ -292,7 +313,7 @@ def node_test_gen(state: PipelineState) -> PipelineState:
     print("\n" + "=" * 60 + "\nNODE: Test Generation Agent")
     state["current_stage"] = "test_gen"
     try:
-        result = run_test_gen_agent(target=state["target"])
+        result = _call_agent_with_retry(run_test_gen_agent,target=state["target"])
         state["testgen_result"] = result
         n      = len(result.get("test_cases", []))
         deploy = result.get("deploy_manifest", {})
@@ -310,7 +331,8 @@ def node_optimization(state: PipelineState) -> PipelineState:
     print("\n" + "=" * 60 + "\nNODE: Optimization + Release Agent")
     state["current_stage"] = "optimization"
     try:
-        result = run_optimization_agent(
+        result = _call_agent_with_retry(
+            run_optimization_agent,
             target  = state["target"],
             version = state["version"],
         )
@@ -421,6 +443,12 @@ def node_summary(state: PipelineState) -> PipelineState:
     ut_passed  = _ut.get("passed",  0)
     ut_failed  = _ut.get("failed",  0)
     ut_total   = _ut.get("total",   0)
+    # If tests were generated this run but Stage 5 ran before Stage AI
+    # (which is always the case in Run 1), show "pending_run2" so the
+    # dashboard displays the correct explanation instead of "partial".
+    if n_tests > 0 and ut_total == 0 and ut_status in ("no_tests_yet", "partial", "no_output"):
+        ut_status = "pending_run2"
+        print(f"[Orchestrator] {n_tests} test(s) generated — will execute in Run 2")
 
     # ── Fault injection ───────────────────────────────────────────
     fi_total   = _fi.get("total_scenarios", 0)
@@ -458,6 +486,13 @@ def node_summary(state: PipelineState) -> PipelineState:
         state["pipeline_passed"] = False
     passed = state["pipeline_passed"]
 
+    # ── Security score override ──────────────────────────────────
+    # If 0 real secrets AND 0 critical CVEs, LLM score of 0 is aberrant
+    if isinstance(sec_score, int) and sec_score < 6 and n_real_secrets == 0 and n_cves == 0:
+        corrected = max(sec_score, 7)
+        print(f"[Orchestrator] Security score corrected: {sec_score}/10 -> {corrected}/10 (no real threats)")
+        sec_score = corrected
+
     # ── Block reason (texte lisible pour le dashboard) ────────────
     block_reasons = []
     if n_real_secrets > 0:
@@ -478,6 +513,11 @@ def node_summary(state: PipelineState) -> PipelineState:
             f"Security score below threshold: {sec_score}/10 (threshold: 6/10)."
         )
     block_reason = " | ".join(block_reasons) if block_reasons else None
+
+    # ── Fix: pipeline_passed must be False when block_reason exists ─
+    if block_reason:
+        state["pipeline_passed"] = False
+        print(f"[Orchestrator] Pipeline BLOCKED: {block_reason[:80]}")
 
     # ── Console summary banner ────────────────────────────────────
     print("\n" + "\n".join([

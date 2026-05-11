@@ -408,13 +408,22 @@ Provide a JSON response with EXACTLY this structure
         report["security_score"] = deterministic_score
 
     # ── Always inject deduplicated secrets list ────────────────────
-    # (don't trust the LLM to enumerate them correctly)
+    # Split into real source-code secrets vs false positives in .patch files
+    def _is_patch_fp(s: dict) -> bool:
+        f = s.get("file", "")
+        return ".patch" in f or f.startswith("reports/patches/") or f.startswith(".autofix-reports/")
+
+    real_s = [s for s in raw_secrets if not _is_patch_fp(s)]
+    fp_s   = [s for s in raw_secrets if _is_patch_fp(s)]
+
     if raw_secrets:
-        report["secrets_found"] = raw_secrets
-        print(f"[Security Agent] Injected {n_secrets} deduplicated "
-              f"secret(s) into report")
+        report["secrets_found"]    = real_s        # only REAL secrets for dashboard
+        report["false_positives"]  = fp_s           # FP list (patch context lines)
+        report["total_secrets_raw"] = len(raw_secrets)
+        print(f"[Security Agent] Secrets: {len(real_s)} real, {len(fp_s)} FP in patches")
     elif not report.get("secrets_found"):
-        report["secrets_found"] = []
+        report["secrets_found"]   = []
+        report["false_positives"] = []
 
     # ── Save ───────────────────────────────────────────────────────
     REPORTS.mkdir(exist_ok=True)

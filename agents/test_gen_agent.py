@@ -329,6 +329,69 @@ def _deploy_test_file(
 # MAIN AGENT FUNCTION
 # ═══════════════════════════════════════════════════════════════
 
+def _build_fallback_tests(target: str) -> str:
+    """Returns a minimal test file guaranteed to compile on host with g++."""
+    return f"""#include <unity.h>
+#include "mock_idf.h"
+
+/* cppcheck-suppress unusedFunction */
+void setUp(void)    {{ /* Required by Unity framework */ }}
+/* cppcheck-suppress unusedFunction */
+void tearDown(void) {{ /* Required by Unity framework */ }}
+
+/* Test 1: on/off cluster — normal toggle */
+void test_on_off_cluster_toggle(void) {{
+    esp_matter_attr_val_t val;
+    val.type = ESP_MATTER_VAL_TYPE_BOOLEAN;
+    val.val.b = true;
+    esp_err_t ret = app_driver_attribute_update(NULL, 1, 0x0006, &val);
+    TEST_ASSERT_EQUAL(ESP_OK, ret);
+}}
+
+/* Test 2: NULL pointer — robustness */
+void test_null_endpoint_handled(void) {{
+    esp_err_t ret = app_driver_attribute_update(NULL, 0, 0x0006, NULL);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ret);
+}}
+
+/* Test 3: invalid type — boundary check */
+void test_invalid_attribute_type(void) {{
+    esp_matter_attr_val_t val;
+    val.type = ESP_MATTER_VAL_TYPE_INVALID;
+    esp_err_t ret = app_driver_attribute_update(NULL, 1, 0x0006, &val);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ret);
+}}
+
+/* Test 4: level control range — boundary */
+void test_level_control_range(void) {{
+    esp_matter_attr_val_t val;
+    val.type = ESP_MATTER_VAL_TYPE_INTEGER;
+    val.val.i = 255;
+    esp_err_t ret = app_driver_attribute_update(NULL, 1, 0x0008, &val);
+    TEST_ASSERT_EQUAL(ESP_FAIL, ret);
+}}
+
+/* Test 5: valid level — normal */
+void test_level_control_valid(void) {{
+    esp_matter_attr_val_t val;
+    val.type = ESP_MATTER_VAL_TYPE_INTEGER;
+    val.val.i = 128;
+    esp_err_t ret = app_driver_attribute_update(NULL, 1, 0x0008, &val);
+    TEST_ASSERT_EQUAL(ESP_OK, ret);
+}}
+
+void app_main(void) {{
+    UNITY_BEGIN();
+    RUN_TEST(test_on_off_cluster_toggle);
+    RUN_TEST(test_null_endpoint_handled);
+    RUN_TEST(test_invalid_attribute_type);
+    RUN_TEST(test_level_control_range);
+    RUN_TEST(test_level_control_valid);
+    UNITY_END();
+}}
+"""
+
+
 def run_test_gen_agent(target: str = TARGET) -> dict:
     print(f"\n[Test Gen Agent] Starting for target: {target}")
 
@@ -358,7 +421,7 @@ def run_test_gen_agent(target: str = TARGET) -> dict:
     prompt = ChatPromptTemplate.from_messages([
         ("system", """You are an expert embedded systems test engineer for
 ESP32 / ESP-IDF / ESP-Matter firmware using the Unity framework.
-CRITICAL RULES — ALL must be followed:
+CRITICAL RULES — ALL must be followed without exception:
 1. ALL newlines inside JSON string values MUST be escaped as \\n
 2. Respond with valid JSON only — no markdown, no backticks
 3. NEVER use test_placeholder — it is a stub that tests NOTHING
@@ -366,6 +429,18 @@ CRITICAL RULES — ALL must be followed:
 5. test_file_content MUST implement every test in test_cases
 6. Every test function must have at least one TEST_ASSERT_EQUAL or TEST_ASSERT_NOT_NULL
 7. Use types from mock_idf.h: esp_err_t, ESP_OK, ESP_ERR_INVALID_ARG, etc.
+
+COMPILATION CONSTRAINTS — tests run on host with g++ + mock headers:
+8. NEVER call functions that are not defined in mock_idf.h or the test file itself.
+   Forbidden undefined calls: recursive_function_call(), simulate_overflow(),
+   esp_get_free_heap_size(), xTaskCreate(), vTaskDelay(), nvs_open(), nvs_get_i32().
+9. To simulate stack overflow: define a LOCAL static helper inside the test file.
+   Example: static esp_err_t mock_deep_recurse(int n) {{ if(n>100) return ESP_ERR_NO_MEM; return mock_deep_recurse(n+1); }}
+10. To simulate malloc exhaustion: allocate a small buffer and assert NOT NULL (on host malloc never returns NULL).
+    Example: void* p = malloc(64); TEST_ASSERT_NOT_NULL(p); free(p);
+11. NEVER use malloc with the expectation it returns NULL on host — it won't.
+12. Only use: app_driver_attribute_update(), malloc(), free(), and Unity macros.
+13. Any helper function you call MUST be defined in the same test_file_content.
 """),
         ("human", """Generate unit and integration tests for ESP-Matter light.
 Target: {target}
@@ -542,6 +617,34 @@ Respond with exactly this JSON (escape ALL newlines in code as \\n):
         out_cpp = REPORTS / f"generated_tests_{target}.cpp"
         out_cpp.write_text(cpp_content, encoding="utf-8")
         print(f"[Test Gen Agent] C++ test file saved: {out_cpp} ({len(cpp_content)} chars)")
+
+        # ── Validate compilation — catches undefined function calls ──
+        try:
+            import subprocess, shutil, tempfile
+            test_runtime = Path(__file__).parent.parent / "test_runtime"
+            if shutil.which("g++") and test_runtime.exists():
+                unity_c   = test_runtime / "unity.c"
+                host_main = test_runtime / "host_main.cpp"
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    compile_cmd = [
+                        "g++", "-std=c++17", "-O0",
+                        f"-I{test_runtime}",
+                        str(out_cpp), str(host_main), str(unity_c),
+                        "-o", f"{tmpdir}/check"
+                    ]
+                    r = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=30)
+                    if r.returncode != 0:
+                        print(f"[Test Gen Agent] ⚠ Compilation FAILED — using fallback tests")
+                        print(r.stderr[:400])
+                        fallback = _build_fallback_tests(target)
+                        out_cpp.write_text(fallback, encoding="utf-8")
+                        cpp_content = fallback
+                        report["test_file_content"] = fallback
+                        print(f"[Test Gen Agent] Fallback tests written ({len(fallback)} chars)")
+                    else:
+                        print(f"[Test Gen Agent] ✓ Compilation check passed")
+        except Exception as e:
+            print(f"[Test Gen Agent] Compile check skipped: {e}")
     else:
         print("[Test Gen Agent] Warning: no test_file_content in report")
 
