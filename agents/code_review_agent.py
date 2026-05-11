@@ -1,15 +1,13 @@
 # ================================================================
-# 🔵 CODE REVIEW AGENT — Stage 1: Qualité du code ESP32 Matter
-# ================================================================
-# ORIGINAL structure preserved — PromptTemplate + Markdown output
-# ADDED: multi-path source resolution so it works both locally
-#        (~/esp-matter/) and in CI (/opt/espressif/esp-matter/)
+# CODE REVIEW AGENT — Stage 1
+# CORRECTION v7 : ajoute quality_score (entier 0-10) directement
+# dans le JSON — le backend n'a plus besoin d'extraire depuis markdown.
 # ================================================================
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from dotenv import load_dotenv
-import json, os
+import json, os, re
 from datetime import datetime
 
 load_dotenv()
@@ -61,10 +59,44 @@ Concrete code improvements with examples.
 
 ## QUALITY SCORE
 Score from 0 to 10 with justification.
+Example format: "Quality Score: 6/10"
 """
 )
 
 chain = prompt | llm | StrOutputParser()
+
+
+def _extract_score(text: str) -> int | None:
+    """
+    Extrait le score numérique (0-10) depuis le markdown.
+    Cherche : "6/10", "Score: 6", "score: 6 out of 10", "Quality Score: 6/10".
+    Retourne None si non trouvé.
+    """
+    # Section ## QUALITY SCORE
+    m = re.search(
+        r"##\s*QUALITY\s*SCORE\b(.*?)(?=##|$)",
+        text, flags=re.I | re.S
+    )
+    if m:
+        section = re.sub(r"\bfrom\s*0\s*to\s*10\b", "", m.group(1), flags=re.I)
+        scores = re.findall(r"\b(\d{1,2})\s*/\s*10\b", section)
+        if scores:
+            n = int(scores[-1])
+            if 0 <= n <= 10:
+                return n
+
+    # Patterns génériques
+    for pat in (
+        r"(?:quality|overall|final)\s*score\s*[:\-=]?\s*(\d{1,2})\s*(?:/\s*10)?",
+        r"(\d{1,2})\s*(?:out of|/)\s*10\b",
+        r"score\s*[:\-=]\s*(\d{1,2})\b",
+    ):
+        matches = re.findall(pat, text, flags=re.I)
+        if matches:
+            valid = [int(s) for s in matches if 0 <= int(s) <= 10]
+            if valid:
+                return valid[-1]
+    return None
 
 
 def read_file(path: str) -> str:
@@ -78,13 +110,6 @@ def read_file(path: str) -> str:
 
 
 def resolve_source_path(source_path: str) -> str:
-    """
-    Try the given path first, then fall back to known locations.
-    This covers:
-      - local VirtualBox: ~/esp-matter/examples/light/main
-      - CI Docker runner: /opt/espressif/esp-matter/examples/light/main
-      - repo submodule:   ./esp-matter/examples/light/main
-    """
     candidates = [
         source_path,
         os.path.expanduser("~/esp-matter/examples/light/main"),
@@ -92,7 +117,6 @@ def resolve_source_path(source_path: str) -> str:
         os.path.join(os.getcwd(), "esp-matter/examples/light/main"),
         os.path.join(os.getcwd(), "../esp-matter/examples/light/main"),
     ]
-
     for candidate in candidates:
         if os.path.isdir(candidate):
             cpp_files = [
@@ -102,8 +126,6 @@ def resolve_source_path(source_path: str) -> str:
             if cpp_files:
                 print(f"  📁 Source found at: {candidate}")
                 return candidate
-
-    # None found — return original so caller handles gracefully
     print(f"  ⚠️  Source not found in any candidate path")
     return source_path
 
@@ -118,7 +140,6 @@ def run_code_review_agent(
     print(f"🎯 Target : {target}")
     print(f"{'='*55}")
 
-    # Resolve actual path
     resolved_path = resolve_source_path(source_path)
 
     print("\n📖 Reading source files...")
@@ -140,22 +161,33 @@ def run_code_review_agent(
     print(result)
     print("-" * 55)
 
-    # ── Same JSON structure as original — "review" key preserved ──
+    # ── CORRECTION : extraire quality_score comme entier ──────────
+    quality_score = _extract_score(result)
+    if quality_score is None:
+        quality_score = 5   # valeur par défaut si LLM ne donne pas de score
+        print(f"  ⚠️  Score not found in markdown — defaulting to {quality_score}/10")
+    else:
+        print(f"  ✅ Quality score extracted: {quality_score}/10")
+
     report = {
         "agent":          "code_review_agent",
         "timestamp":      datetime.now().isoformat(),
         "target":         target,
         "source_path":    resolved_path,
         "files_reviewed": ["app_main.cpp", "app_driver.cpp", "app_priv.h"],
-        "review":         result,   # ← release_agent reads this key
+        "review":         result,         # texte markdown complet
+        "quality_score":  quality_score,  # ← NOUVEAU : entier 0-10 direct
+        "score":          quality_score,  # ← alias pour compatibilité orchestrateur
+        "issues":         [],             # ← NOUVEAU : liste vide (pas d'issues structurées)
         "status":         "completed"
     }
 
     os.makedirs("reports", exist_ok=True)
-    with open(f"reports/code-review-{target}.json", "w") as f:
+    out_path = f"reports/code-review-{target}.json"
+    with open(out_path, "w") as f:
         json.dump(report, f, indent=2)
 
-    print(f"\n✅ Report saved: reports/code-review-{target}.json")
+    print(f"\n✅ Report saved: {out_path}")
     return report
 
 
