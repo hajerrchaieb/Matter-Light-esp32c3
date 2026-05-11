@@ -390,7 +390,7 @@ jobs:
       - name: Download generated tests from previous run (Run 2 critical)
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           mkdir -p ${{ env.REPORTS_DIR }}
           BRANCH="${{ github.ref_name }}"
@@ -2175,7 +2175,7 @@ jobs:
             security-reports/sbom-cyclonedx.json
             ota-bundle-${{ steps.version.outputs.version }}.tar.gz
           fail_on_unmatched_files: false
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN }}
 # ════════════════════════════════════════════════════════════════════
 # STAGE 8 — PIPELINE SUMMARY & NOTIFICATIONS
 # ════════════════════════════════════════════════════════════════════
