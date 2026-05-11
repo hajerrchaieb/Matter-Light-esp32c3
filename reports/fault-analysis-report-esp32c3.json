@@ -1,0 +1,73 @@
+{
+  "target": "esp32c3",
+  "robustness_score": 7,
+  "score_justification": "The esp32c3 scored 7 out of 10 due to a critical failure in the stack_overflow_trigger scenario, which resulted in a crash instead of the expected reboot. However, it passed 9 out of 10 scenarios, including all high-severity tests, indicating a good level of robustness. The score is justified by the fact that the device handled most critical and high-severity scenarios, but failed to handle a critical memory-related scenario.",
+  "failed_scenarios_analysis": [
+    {
+      "scenario": "stack_overflow_trigger",
+      "family": "memory",
+      "cwe": "CWE-121",
+      "root_cause": "inadequate stack size or improper use of recursive functions",
+      "fix_code": "increase stack size or refactor recursive functions to iterative ones",
+      "effort": "medium"
+    }
+  ],
+  "passed_scenarios_highlights": [
+    {
+      "scenario": "nvs_magic_corruption",
+      "why_good": "correctly calls nvs_flash_erase() to handle corruption"
+    },
+    {
+      "scenario": "malloc_exhaustion",
+      "why_good": "properly handles memory exhaustion by returning an error"
+    }
+  ],
+  "family_assessments": {
+    "memory": {
+      "score": 6,
+      "verdict": "NEEDS_IMPROVEMENT",
+      "top_recommendation": "increase stack size and refactor recursive functions"
+    },
+    "nvs": {
+      "score": 8,
+      "verdict": "GOOD",
+      "top_recommendation": "continue to use nvs_flash_erase() to handle corruption"
+    },
+    "matter": {
+      "score": 7,
+      "verdict": "ACCEPTABLE",
+      "top_recommendation": "improve error handling for matter-related scenarios"
+    }
+  },
+  "priority_fixes": [
+    "1. [CRITICAL] Fix stack overflow trigger by increasing stack size or refactoring recursive functions",
+    "2. [HIGH] Improve error handling for matter-related scenarios to prevent potential crashes",
+    "3. [MEDIUM] Refactor code to separate concerns and improve readability"
+  ],
+  "overall_verdict": "NEEDS_IMPROVEMENT",
+  "summary": "The esp32c3 demonstrated good robustness in most scenarios, but failed to handle a critical memory-related scenario. To improve, it is recommended to fix the stack overflow trigger, improve error handling for matter-related scenarios, and refactor the code to separate concerns and improve readability. With these fixes, the device can achieve a higher level of robustness and reliability.",
+  "fault_runner_summary": {
+    "total": 10,
+    "passed": 9,
+    "failed": 1,
+    "status": "critical_fail",
+    "by_family": {
+      "memory": {
+        "total": 4,
+        "passed": 3,
+        "failed": 1
+      },
+      "nvs": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      },
+      "matter": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      }
+    }
+  },
+  "analysis_timestamp": "2026-05-11T06:29:22.576806"
+}
