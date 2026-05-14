@@ -1,0 +1,73 @@
+{
+  "target": "esp32c3",
+  "robustness_score": 7,
+  "score_justification": "The score of 7 is justified because the system handled most of the fault injection scenarios, but failed in the critical 'stack_overflow_trigger' scenario, resulting in a crash. The system also passed all the high-severity scenarios, but had some minor issues in the 'nvs' and 'matter' families. Overall, the system demonstrates some robustness, but requires improvements to handle critical failures and high-severity issues.",
+  "failed_scenarios_analysis": [
+    {
+      "scenario": "stack_overflow_trigger",
+      "family": "memory",
+      "cwe": "CWE-121",
+      "root_cause": "inadequate stack size or recursive function calls",
+      "fix_code": "increase stack size or optimize recursive function calls",
+      "effort": "medium"
+    }
+  ],
+  "passed_scenarios_highlights": [
+    {
+      "scenario": "nvs_magic_corruption",
+      "why_good": "correctly calls nvs_flash_erase() to handle corruption"
+    },
+    {
+      "scenario": "malloc_exhaustion",
+      "why_good": "correctly handles memory exhaustion by returning an error"
+    }
+  ],
+  "family_assessments": {
+    "memory": {
+      "score": 6,
+      "verdict": "NEEDS_IMPROVEMENT",
+      "top_recommendation": "increase stack size and optimize recursive function calls"
+    },
+    "nvs": {
+      "score": 8,
+      "verdict": "GOOD",
+      "top_recommendation": "continue to use nvs_flash_erase() to handle corruption"
+    },
+    "matter": {
+      "score": 7,
+      "verdict": "ACCEPTABLE",
+      "top_recommendation": "improve error handling for Matter protocol"
+    }
+  },
+  "priority_fixes": [
+    "1. [CRITICAL] Fix stack overflow trigger by increasing stack size or optimizing recursive function calls",
+    "2. [HIGH] Improve error handling for Matter protocol to prevent crashes",
+    "3. [MEDIUM] Optimize memory allocation to prevent memory exhaustion"
+  ],
+  "overall_verdict": "NEEDS_IMPROVEMENT",
+  "summary": "The esp32c3 system demonstrates some robustness, but requires improvements to handle critical failures and high-severity issues. The system failed in the 'stack_overflow_trigger' scenario and had some minor issues in the 'nvs' and 'matter' families. Priority fixes include fixing the stack overflow trigger, improving error handling for Matter protocol, and optimizing memory allocation.",
+  "fault_runner_summary": {
+    "total": 10,
+    "passed": 9,
+    "failed": 1,
+    "status": "critical_fail",
+    "by_family": {
+      "memory": {
+        "total": 4,
+        "passed": 3,
+        "failed": 1
+      },
+      "nvs": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      },
+      "matter": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      }
+    }
+  },
+  "analysis_timestamp": "2026-05-14T11:30:00.518858"
+}

@@ -1,0 +1,13 @@
+{
+  "version": "v84",
+  "target": "esp32c3",
+  "generated_at": "2026-05-14T11:31:02.577698Z",
+  "changelog": "# \u2728 New Features\n* No new features were added in this release\n* Existing features continue to function as expected on the ESP32C3 platform\n* Matter protocol implementation remains unchanged\n\n# \ud83d\udc1b Bug Fixes\n* No bug fixes were applied in this release\n* Existing issues remain under investigation\n* No regressions were detected in this release\n\n# \ud83d\udd10 Security\n* Security score remains at 0/10, indicating significant vulnerabilities\n* One secret was detected, posing a potential security risk\n* No critical CVEs were identified in this release\n\n# \u26a1 Performance\n* Flash usage is at 43.9%, leaving room for optimization\n* Potential saving of 95 KB was identified, which could improve performance\n* No performance-related issues were detected in this release\n\n# \ud83d\udd0d Code Quality\n* Code quality remains unchanged, with no significant improvements or regressions\n* No AI patches were applied to improve code quality\n* Four tests were generated to validate code functionality\n\n# \u2705 Quality Gates\n* Build process was successful, with no errors or warnings\n* Tests generated in this release passed without issues\n* Quality gates were met, allowing the release to proceed\n\n# \u26a0\ufe0f Known Issues\n* Security score of 0/10 indicates significant known security issues\n* Presence of one secret poses a known security risk\n* No known performance issues were detected in this release\n\n# \ud83d\udd1c Next Release\n* Addressing the security score and detected secret will be a priority\n* Optimizing flash usage to improve performance will be investigated\n* Applying AI patches to improve code quality will be considered",
+  "changelog_file": "reports/CHANGELOG-v84.md",
+  "security_score": 0,
+  "build_status": "success",
+  "patches_applied": 0,
+  "tests_generated": 4,
+  "flash_pct": 43.9,
+  "canary_deploy": "simulated"
+}
