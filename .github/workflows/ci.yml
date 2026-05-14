@@ -1009,108 +1009,6 @@ jobs:
           fi
           # Show summary
           python3 -c "import json; d=json.load(open('${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json')); print('Fault injection: '+str(d.get('passed',0))+'/'+str(d.get('total_scenarios',0))+' passed | status='+str(d.get('overall_status','?')))" 2>/dev/null || true
-
-      # ── HIL BRANCHÉ : génère hil-report-{target}.json via QEMU proxy ──
-      - name: HIL Simulation — QEMU proxy test
-        id: hil_sim
-        continue-on-error: true
-        run: |
-          TARGET="esp32c3"
-          REPORT="${{ env.REPORTS_DIR }}/hil-report-${TARGET}.json"
-          mkdir -p ${{ env.REPORTS_DIR }}
-
-          # Cherche le flash image produit par le step QEMU
-          FLASH_IMG="${{ env.FIRMWARE_DIR }}/esp32c3/flash_image.bin"
-
-          if [ ! -f "$FLASH_IMG" ] || [ "${{ env.QEMU_SKIP }}" = "true" ] || [ "${{ env.QEMU_AVAILABLE }}" = "false" ]; then
-            echo "HIL skipped — no flash image or QEMU not available"
-            cat > "$REPORT" << EOF
-          {
-            "status": "skipped",
-            "reason": "flash image not found or QEMU unavailable",
-            "device": "${TARGET}-qemu-proxy",
-            "tests_run": 0,
-            "tests_passed": 0,
-            "tests_failed": 0,
-            "duration_s": 0,
-            "failures": []
-          }
-          EOF
-          else
-            echo "=== HIL Simulation via QEMU for $TARGET ==="
-            START=$(date +%s)
-            PASS=0; FAIL=0
-            declare -a FAILURES=()
-
-            # Test 1 : boot sequence (app_main visible dans les logs)
-            BOOT_LOG=$(timeout 30 qemu-system-riscv32               -nographic -no-reboot               -machine esp32c3               -drive file="$FLASH_IMG",if=mtd,format=raw               -serial stdio 2>&1 || true)
-            if echo "$BOOT_LOG" | grep -qE "app_main|cpu_start: Pro cpu"; then
-              PASS=$((PASS+1))
-              echo "  [HIL-1] boot_sequence: PASS"
-            else
-              FAIL=$((FAIL+1))
-              FAILURES+=("boot_sequence")
-              echo "  [HIL-1] boot_sequence: FAIL"
-            fi
-
-            # Test 2 : no panic or guru meditation
-            if echo "$BOOT_LOG" | grep -qE "Guru Meditation|abort\(\)|Backtrace:"; then
-              FAIL=$((FAIL+1))
-              FAILURES+=("no_panic_at_boot")
-              echo "  [HIL-2] no_panic_at_boot: FAIL"
-            else
-              PASS=$((PASS+1))
-              echo "  [HIL-2] no_panic_at_boot: PASS"
-            fi
-
-            # Test 3 : Matter stack init (optionnel — passe si log absent)
-            if echo "$BOOT_LOG" | grep -qE "CHIPoBLE|esp_matter|Initializing Matter|OpenThread"; then
-              PASS=$((PASS+1))
-              echo "  [HIL-3] matter_stack_init: PASS"
-            elif echo "$BOOT_LOG" | grep -q "app_main"; then
-              # app_main présent mais Matter pas encore init = attente normale
-              PASS=$((PASS+1))
-              echo "  [HIL-3] matter_stack_init: PASS (app_main reached)"
-            else
-              FAIL=$((FAIL+1))
-              FAILURES+=("matter_stack_init")
-              echo "  [HIL-3] matter_stack_init: FAIL"
-            fi
-
-            END=$(date +%s)
-            DURATION=$((END-START))
-            TOTAL=$((PASS+FAIL))
-            STATUS="pass"
-            [ $FAIL -gt 0 ] && STATUS="fail"
-            PASS_RATE=0
-            [ $TOTAL -gt 0 ] && PASS_RATE=$(echo "scale=1; $PASS * 100 / $TOTAL" | bc 2>/dev/null || echo "0")
-
-            # Sérialise les failures en JSON array
-            FAIL_JSON="["
-            SEP=""
-            for f in "${FAILURES[@]}"; do
-              FAIL_JSON+="${SEP}\"${f}\""
-              SEP=","
-            done
-            FAIL_JSON+="]"
-
-            cat > "$REPORT" << EOF
-          {
-            "status": "$STATUS",
-            "device": "${TARGET}-qemu-proxy",
-            "tests_run": $TOTAL,
-            "tests_passed": $PASS,
-            "tests_failed": $FAIL,
-            "pass_rate": $PASS_RATE,
-            "duration_s": $DURATION,
-            "test_scenarios": ["boot_sequence", "no_panic_at_boot", "matter_stack_init"],
-            "failures": $FAIL_JSON
-          }
-          EOF
-            echo "=== HIL result: $STATUS ($PASS/$TOTAL) ==="
-          fi
-          cat "$REPORT"
-
       - name: Upload test & quality reports
         uses: actions/upload-artifact@v4
         if: always()
@@ -1133,8 +1031,119 @@ jobs:
             ${{ env.REPORTS_DIR }}/fuzz-build.log
             ${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json
             ${{ env.REPORTS_DIR }}/fault-injection-run.log
-            ${{ env.REPORTS_DIR }}/hil-report-esp32c3.json
           retention-days: 30
+          # ── HIL BRANCHÉ : génère hil-report-{target}.json via QEMU comme proxy ──
+      - name: HIL Simulation — QEMU proxy test
+        id: hil_sim
+        run: |
+          TARGET="${{ matrix.target }}"
+          REPORT="reports/hil-report-${TARGET}.json"
+          mkdir -p reports
+
+          # Vérifie si le firmware existe (généré au Stage 4)
+          FIRMWARE=$(ls firmware/light.bin 2>/dev/null || ls firmware/*.bin 2>/dev/null | head -1)
+
+          if [ -z "$FIRMWARE" ]; then
+            echo "No firmware binary found — HIL skipped"
+            cat > "$REPORT" << EOF
+          {
+            "status": "skipped",
+            "reason": "firmware binary not found",
+            "device": "${TARGET}-qemu-proxy",
+            "tests_run": 0,
+            "tests_passed": 0,
+            "tests_failed": 0,
+            "duration_s": 0,
+            "failures": []
+          }
+          EOF
+          else
+            echo "Running HIL simulation via QEMU for $TARGET..."
+            START=$(date +%s)
+
+            # Scénarios de test HIL simulés via QEMU
+            PASS=0
+            FAIL=0
+            FAILURES=()
+
+            # Test 1 : boot séquence
+            if timeout 30 qemu-system-riscv32 \
+              -nographic -machine esp32c3 \
+              -drive file="$FIRMWARE",if=mtd,format=raw \
+              -no-reboot 2>&1 | grep -q "I (.*) app_main"; then
+              PASS=$((PASS+1))
+              echo "  [HIL] boot_sequence: PASS"
+            else
+              FAIL=$((FAIL+1))
+              FAILURES+=("boot_sequence")
+              echo "  [HIL] boot_sequence: FAIL (timeout or no app_main log)"
+            fi
+
+            # Test 2 : Matter stack init
+            if timeout 45 qemu-system-riscv32 \
+              -nographic -machine esp32c3 \
+              -drive file="$FIRMWARE",if=mtd,format=raw \
+              -no-reboot 2>&1 | grep -q "CHIP:DL: BLE init"; then
+              PASS=$((PASS+1))
+              echo "  [HIL] matter_stack_init: PASS"
+            else
+              FAIL=$((FAIL+1))
+              FAILURES+=("matter_stack_init")
+              echo "  [HIL] matter_stack_init: FAIL"
+            fi
+
+            # Test 3 : no panic/exception at startup
+            BOOT_LOG=$(timeout 20 qemu-system-riscv32 \
+              -nographic -machine esp32c3 \
+              -drive file="$FIRMWARE",if=mtd,format=raw \
+              -no-reboot 2>&1 || true)
+            if echo "$BOOT_LOG" | grep -qE "Guru Meditation|panic|LoadProhibited"; then
+              FAIL=$((FAIL+1))
+              FAILURES+=("no_panic_at_boot")
+              echo "  [HIL] no_panic_at_boot: FAIL"
+            else
+              PASS=$((PASS+1))
+              echo "  [HIL] no_panic_at_boot: PASS"
+            fi
+
+            END=$(date +%s)
+            DURATION=$((END-START))
+            TOTAL=$((PASS+FAIL))
+            STATUS="pass"
+            [ $FAIL -gt 0 ] && STATUS="fail"
+
+            # Sérialise les failures en JSON
+            FAIL_JSON="["
+            for f in "${FAILURES[@]}"; do
+              FAIL_JSON+="\"$f\","
+            done
+            FAIL_JSON="${FAIL_JSON%,}]"
+
+            cat > "$REPORT" << EOF
+          {
+            "status": "$STATUS",
+            "device": "${TARGET}-qemu-proxy",
+            "tests_run": $TOTAL,
+            "tests_passed": $PASS,
+            "tests_failed": $FAIL,
+            "pass_rate": $(echo "scale=1; $PASS * 100 / $TOTAL" | bc 2>/dev/null || echo "0"),
+            "duration_s": $DURATION,
+            "firmware_tested": "$FIRMWARE",
+            "test_scenarios": ["boot_sequence", "matter_stack_init", "no_panic_at_boot"],
+            "failures": $FAIL_JSON
+          }
+          EOF
+          fi
+
+          echo "HIL report:"
+          cat "$REPORT"
+        continue-on-error: true
+
+      - name: Upload HIL report
+        uses: actions/upload-artifact@v4
+        with:
+          name: hil-report-${{ matrix.target }}
+          path: reports/hil-report-${{ matrix.target }}.json
 
 # ════════════════════════════════════════════════════════════════════
 # STAGE 6 — FIRMWARE SECURITY AUDIT
@@ -1689,7 +1698,6 @@ jobs:
             ${{ env.REPORTS_DIR }}/unit-test-results-qemu.json
             ${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json
             ${{ env.REPORTS_DIR }}/fuzz-report-esp32c3.json
-            ${{ env.REPORTS_DIR }}/hil-report-esp32c3.json
             ${{ env.REPORTS_DIR }}/test-deploy-manifest.json
             ${{ env.REPORTS_DIR }}/patches/
           retention-days: 90
@@ -2450,45 +2458,6 @@ jobs:
           echo "deploy_status=$DEPLOY_STATUS" >> $GITHUB_OUTPUT
           mkdir -p ${{ env.REPORTS_DIR }}
           echo "$DEPLOY_STATUS" > ${{ env.REPORTS_DIR }}/deploy-status.txt
-          # ← OTA FIX : enrichir ota-manifest-signed.json avec le statut réel
-          OTA_MANIFEST="${{ env.REPORTS_DIR }}/ota-manifest-signed.json"
-          if [ ! -f "$OTA_MANIFEST" ]; then
-            python3 -c "
-import json, os, glob
-version = '${{ needs.release.outputs.version }}' or 'unknown'
-commit  = '${{ github.sha }}'
-checksums = {}
-for b in glob.glob('${{ env.FIRMWARE_DIR }}/esp32c3/*.bin'):
-    import hashlib
-    with open(b, 'rb') as fh:
-        checksums[os.path.basename(b)] = hashlib.sha256(fh.read()).hexdigest()
-manifest = {
-    'version':   version,
-    'commit':    commit,
-    'target':    'esp32c3',
-    'checksums': checksums,
-    'deploy_status': '$DEPLOY_STATUS',
-    'rollout_pct': 10,
-    'protocol': 'ESP-Matter OTA',
-}
-with open('$OTA_MANIFEST', 'w') as f:
-    json.dump(manifest, f, indent=2)
-print('OTA manifest written: ' + version)
-"
-          else
-            python3 -c "
-import json
-p = '$OTA_MANIFEST'
-try:
-    d = json.load(open(p))
-    d['deploy_status'] = '$DEPLOY_STATUS'
-    d['rollout_pct'] = 10
-    json.dump(d, open(p, 'w'), indent=2)
-    print('OTA manifest updated: deploy_status=' + '$DEPLOY_STATUS')
-except Exception as e:
-    print('OTA manifest update skipped: ' + str(e))
-"
-          fi
       - name: Auto-Rollback on High Crash Rate
         if: steps.poll.outputs.deploy_status == 'rollback'
         env:
