@@ -2242,6 +2242,7 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           > le pipeline complet (stages 1→AI) avec les corrections.
           > Merger la PR si tous les scores s'améliorent.
           EOF
+          EOF
 # ════════════════════════════════════════════════════════════════════
 # STAGE 7 — RELEASE
 # ════════════════════════════════════════════════════════════════════
