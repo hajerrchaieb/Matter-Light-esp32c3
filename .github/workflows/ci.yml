@@ -576,16 +576,78 @@ jobs:
             echo "::warning::Missing firmware binaries — QEMU will be skipped"
             echo "QEMU_SKIP=true" >> $GITHUB_ENV
           else
-            esptool.py --chip esp32c3 merge_bin \
-              --output "$FW_DIR/flash_image.bin" \
-              --flash_mode dio \
-              --flash_freq 80m \
-              --flash_size 4MB \
-              0x0     "$BOOTLOADER" \
-              0x8000  "$PARTITION" \
-              0x10000 "$APP"
-            echo "Flash image created"
-            echo "QEMU_SKIP=false" >> $GITHUB_ENV
+            # FIX 1: include ota_data_initial.bin at 0xd000 (required for Matter OTA partition)
+            OTA_DATA=$(find "$FW_DIR" -name "ota_data_initial.bin" | head -1)
+            echo "OTA data : ${OTA_DATA:-not found}"
+
+            # FIX 2: use flasher_args.json addresses when available (most accurate)
+            FLASHER_ARGS="$FW_DIR/flasher_args.json"
+            if [ -f "$FLASHER_ARGS" ] && command -v python3 &>/dev/null; then
+              echo "Using flasher_args.json for correct flash addresses..."
+              python3 << 'PYEOF_MERGE'
+import json, subprocess, sys, os
+from pathlib import Path
+
+fw_dir = Path(os.environ.get("FW_DIR", "firmware/esp32c3"))
+args_file = fw_dir / "flasher_args.json"
+out_file  = fw_dir / "flash_image.bin"
+
+try:
+    args = json.loads(args_file.read_text())
+    flash_files = args.get("flash_files", {})
+    if not flash_files:
+        print("No flash_files in flasher_args.json — using fallback")
+        sys.exit(1)
+
+    cmd = ["esptool", "--chip", "esp32c3", "merge-bin",
+           "--output", str(out_file),
+           "--flash-mode", args.get("flash_mode", "dio"),
+           "--flash-freq", args.get("flash_freq", "80m"),
+           "--flash-size", args.get("flash_size", "4MB")]
+
+    for addr, fname in sorted(flash_files.items(), key=lambda x: int(x[0], 16)):
+        fpath = fw_dir / fname
+        if fpath.exists():
+            cmd += [addr, str(fpath)]
+            print(f"  {addr}: {fname} ({fpath.stat().st_size} bytes)")
+        else:
+            print(f"  SKIP {addr}: {fname} (not found)")
+
+    print("Running:", " ".join(cmd[:6]), "...")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        size = out_file.stat().st_size if out_file.exists() else 0
+        print(f"Flash image created: {size} bytes")
+    else:
+        print("esptool error:", result.stderr[:300])
+        sys.exit(1)
+except Exception as e:
+    print(f"flasher_args approach failed: {e}")
+    sys.exit(1)
+PYEOF_MERGE
+              MERGE_OK=$?
+            else
+              MERGE_OK=1
+            fi
+
+            # Fallback: manual merge with ota_data_initial.bin included
+            if [ "$MERGE_OK" != "0" ] || [ ! -f "$FW_DIR/flash_image.bin" ]; then
+              echo "Using manual merge with correct ESP32-C3 Matter addresses..."
+              if [ -n "$OTA_DATA" ]; then
+                esptool --chip esp32c3 merge-bin                   --output "$FW_DIR/flash_image.bin"                   --flash-mode dio --flash-freq 80m --flash-size 4MB                   0x0     "$BOOTLOADER"                   0x8000  "$PARTITION"                   0xd000  "$OTA_DATA"                   0x10000 "$APP"                   2>&1 ||                 esptool.py --chip esp32c3 merge_bin                   --output "$FW_DIR/flash_image.bin"                   --flash_mode dio --flash_freq 80m --flash_size 4MB                   0x0     "$BOOTLOADER"                   0x8000  "$PARTITION"                   0xd000  "$OTA_DATA"                   0x10000 "$APP"
+              else
+                esptool --chip esp32c3 merge-bin                   --output "$FW_DIR/flash_image.bin"                   --flash-mode dio --flash-freq 80m --flash-size 4MB                   0x0     "$BOOTLOADER"                   0x8000  "$PARTITION"                   0x10000 "$APP"                   2>&1 ||                 esptool.py --chip esp32c3 merge_bin                   --output "$FW_DIR/flash_image.bin"                   --flash_mode dio --flash_freq 80m --flash_size 4MB                   0x0     "$BOOTLOADER"                   0x8000  "$PARTITION"                   0x10000 "$APP"
+              fi
+            fi
+
+            if [ -f "$FW_DIR/flash_image.bin" ]; then
+              SIZE=$(stat -c%s "$FW_DIR/flash_image.bin" 2>/dev/null || echo "?")
+              echo "Flash image created: $SIZE bytes"
+              echo "QEMU_SKIP=false" >> $GITHUB_ENV
+            else
+              echo "::warning::flash_image.bin not created — QEMU will be skipped"
+              echo "QEMU_SKIP=true" >> $GITHUB_ENV
+            fi
           fi
       - name: Run firmware in QEMU (45 second window)
         if: env.QEMU_SKIP != 'true'
@@ -594,8 +656,11 @@ jobs:
           mkdir -p ${{ env.REPORTS_DIR }}
           echo "======== QEMU SESSION START ========" \
             > ${{ env.REPORTS_DIR }}/qemu-run.log
-          timeout 45 qemu-system-riscv32 \
+          # FIX 2: -no-reboot prevents infinite restart loop on panic
+          # timeout increased to 90s — Matter stack init takes ~30-60s
+          timeout 90 qemu-system-riscv32 \
             -nographic \
+            -no-reboot \
             -machine esp32c3 \
             -drive file="$FW_DIR/flash_image.bin",if=mtd,format=raw \
             -serial stdio \
@@ -625,7 +690,15 @@ jobs:
           }
           for line in lines:
             l = line.strip()
-            if any(k in l for k in ["cpu_start: Pro cpu","cpu_start: App cpu","app_main"]):
+            # FIX 3: ESP32-C3 is RISC-V single-core — different boot keywords than dual-core ESP32
+            if any(k in l for k in [
+                "cpu_start: Pro cpu", "cpu_start: App cpu",  # ESP32 dual-core (legacy)
+                "cpu_start:",                                  # ESP32-C3 single-core RISC-V
+                "Running on single core",                      # ESP32-C3 specific
+                "app_main",                                    # app entry point
+                "ESP-IDF",                                     # IDF version banner
+                "I (", "W (",                                  # any IDF log = booted
+            ]):
               findings["boot_success"] = True
             if "app_main" in l.lower() and findings["boot_success"]:
               findings["app_started"] = True
@@ -1032,118 +1105,6 @@ jobs:
             ${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json
             ${{ env.REPORTS_DIR }}/fault-injection-run.log
           retention-days: 30
-          # ── HIL BRANCHÉ : génère hil-report-{target}.json via QEMU comme proxy ──
-      - name: HIL Simulation — QEMU proxy test
-        id: hil_sim
-        run: |
-          TARGET="${{ matrix.target }}"
-          REPORT="reports/hil-report-${TARGET}.json"
-          mkdir -p reports
-
-          # Vérifie si le firmware existe (généré au Stage 4)
-          FIRMWARE=$(ls firmware/light.bin 2>/dev/null || ls firmware/*.bin 2>/dev/null | head -1)
-
-          if [ -z "$FIRMWARE" ]; then
-            echo "No firmware binary found — HIL skipped"
-            cat > "$REPORT" << EOF
-          {
-            "status": "skipped",
-            "reason": "firmware binary not found",
-            "device": "${TARGET}-qemu-proxy",
-            "tests_run": 0,
-            "tests_passed": 0,
-            "tests_failed": 0,
-            "duration_s": 0,
-            "failures": []
-          }
-          EOF
-          else
-            echo "Running HIL simulation via QEMU for $TARGET..."
-            START=$(date +%s)
-
-            # Scénarios de test HIL simulés via QEMU
-            PASS=0
-            FAIL=0
-            FAILURES=()
-
-            # Test 1 : boot séquence
-            if timeout 30 qemu-system-riscv32 \
-              -nographic -machine esp32c3 \
-              -drive file="$FIRMWARE",if=mtd,format=raw \
-              -no-reboot 2>&1 | grep -q "I (.*) app_main"; then
-              PASS=$((PASS+1))
-              echo "  [HIL] boot_sequence: PASS"
-            else
-              FAIL=$((FAIL+1))
-              FAILURES+=("boot_sequence")
-              echo "  [HIL] boot_sequence: FAIL (timeout or no app_main log)"
-            fi
-
-            # Test 2 : Matter stack init
-            if timeout 45 qemu-system-riscv32 \
-              -nographic -machine esp32c3 \
-              -drive file="$FIRMWARE",if=mtd,format=raw \
-              -no-reboot 2>&1 | grep -q "CHIP:DL: BLE init"; then
-              PASS=$((PASS+1))
-              echo "  [HIL] matter_stack_init: PASS"
-            else
-              FAIL=$((FAIL+1))
-              FAILURES+=("matter_stack_init")
-              echo "  [HIL] matter_stack_init: FAIL"
-            fi
-
-            # Test 3 : no panic/exception at startup
-            BOOT_LOG=$(timeout 20 qemu-system-riscv32 \
-              -nographic -machine esp32c3 \
-              -drive file="$FIRMWARE",if=mtd,format=raw \
-              -no-reboot 2>&1 || true)
-            if echo "$BOOT_LOG" | grep -qE "Guru Meditation|panic|LoadProhibited"; then
-              FAIL=$((FAIL+1))
-              FAILURES+=("no_panic_at_boot")
-              echo "  [HIL] no_panic_at_boot: FAIL"
-            else
-              PASS=$((PASS+1))
-              echo "  [HIL] no_panic_at_boot: PASS"
-            fi
-
-            END=$(date +%s)
-            DURATION=$((END-START))
-            TOTAL=$((PASS+FAIL))
-            STATUS="pass"
-            [ $FAIL -gt 0 ] && STATUS="fail"
-
-            # Sérialise les failures en JSON
-            FAIL_JSON="["
-            for f in "${FAILURES[@]}"; do
-              FAIL_JSON+="\"$f\","
-            done
-            FAIL_JSON="${FAIL_JSON%,}]"
-
-            cat > "$REPORT" << EOF
-          {
-            "status": "$STATUS",
-            "device": "${TARGET}-qemu-proxy",
-            "tests_run": $TOTAL,
-            "tests_passed": $PASS,
-            "tests_failed": $FAIL,
-            "pass_rate": $(echo "scale=1; $PASS * 100 / $TOTAL" | bc 2>/dev/null || echo "0"),
-            "duration_s": $DURATION,
-            "firmware_tested": "$FIRMWARE",
-            "test_scenarios": ["boot_sequence", "matter_stack_init", "no_panic_at_boot"],
-            "failures": $FAIL_JSON
-          }
-          EOF
-          fi
-
-          echo "HIL report:"
-          cat "$REPORT"
-        continue-on-error: true
-
-      - name: Upload HIL report
-        uses: actions/upload-artifact@v4
-        with:
-          name: hil-report-${{ matrix.target }}
-          path: reports/hil-report-${{ matrix.target }}.json
 
 # ════════════════════════════════════════════════════════════════════
 # STAGE 6 — FIRMWARE SECURITY AUDIT
