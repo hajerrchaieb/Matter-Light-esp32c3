@@ -62,12 +62,10 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y yamllint cppcheck flawfinder clang-format python3-pip
           pip3 install bandit
-
       # ✅ FIX 1 — yamllint NON-BLOCKING
       - name: 🗂️ Validate Workflow YAML
         run: |
           yamllint -d relaxed .github/workflows/ || true
-
       - name: 📝 Lint Commit Messages
         if: github.event_name == 'pull_request' || github.ref == 'refs/heads/develop'
         uses: wagoid/commitlint-github-action@v5
@@ -86,7 +84,6 @@ jobs:
           else
             echo "✅ pre-commit config found"
           fi
-
       # ✅ FIX 2 — clang-format NO FAIL
       - name: 🎨 Clang-Format Check
         run: |
@@ -102,7 +99,6 @@ jobs:
           else
             echo "Source path not found: ${{ env.EXAMPLE_PATH }} — skipping clang-format"
           fi
-
       # ✅ FIX 3 — Bandit NON-BLOCKING (already almost ok)
       - name: 🔐 Python Security Scan (Bandit)
         run: |
@@ -114,7 +110,6 @@ jobs:
             echo "No Python files found — skipping Bandit" \
               | tee ${{ env.REPORTS_DIR }}/bandit-report.json
           fi
-
       # ✅ FIX 4 — cppcheck NEVER FAIL — also skips the test/ folder
       # (Unity boilerplate triggers style warnings that are not bugs)
       - name: 🔍 cppcheck Early Static Analysis
@@ -135,7 +130,6 @@ jobs:
           else
             echo "Source path not found: ${{ env.EXAMPLE_PATH }}"
           fi
-
       - name: 📤 Upload lint reports
         uses: actions/upload-artifact@v4
         with:
@@ -143,9 +137,9 @@ jobs:
           path: ${{ env.REPORTS_DIR }}/
           retention-days: 30
 
-  # ════════════════════════════════════════════════════════════════════
-  # STAGE 2 — SECRET & SUPPLY CHAIN SECURITY
-  # ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
+# STAGE 2 — SECRET & SUPPLY CHAIN SECURITY
+# ════════════════════════════════════════════════════════════════════
   security-shift-left:
     name: Stage 2 — Secret & Supply Chain Scan
     runs-on: ubuntu-latest
@@ -163,13 +157,12 @@ jobs:
             | tar -xz
           sudo mv gitleaks /usr/local/bin/
           mkdir -p ${{ env.REPORTS_DIR }}
-
       - name: Secret Scan (Gitleaks)
         run: |
           # Exclude .env and reports/ from scan (contain runtime-generated secrets)
           # Create .gitleaksignore if not present
           if [ ! -f .gitleaksignore ]; then
-            printf '.env\nreports/\n.autofix-reports/\n' > /tmp/.gitleaksignore
+            printf '.env\nreports/\n.autofix-reports/\n'               > /tmp/.gitleaksignore
             IGNORE_FLAG="--gitleaks-ignore-path=/tmp/.gitleaksignore"
           else
             IGNORE_FLAG="--gitleaks-ignore-path=.gitleaksignore"
@@ -195,7 +188,6 @@ jobs:
               echo "No secrets detected by Gitleaks"
             fi
           fi
-
       - name: Generate SBOM (SPDX-JSON)
         uses: anchore/sbom-action@v0
         with:
@@ -220,7 +212,6 @@ jobs:
             --file ${{ env.REPORTS_DIR }}/grype-report.json || true
           grype sbom:${{ env.REPORTS_DIR }}/sbom-spdx.json \
             --fail-on critical || true
-
       - name: Check Dependabot Config
         run: |
           if [ ! -f .github/dependabot.yml ]; then
@@ -228,7 +219,6 @@ jobs:
           else
             echo "Dependabot config found"
           fi
-
       - name: Upload security reports
         uses: actions/upload-artifact@v4
         with:
@@ -236,9 +226,9 @@ jobs:
           path: ${{ env.REPORTS_DIR }}/
           retention-days: 90
 
-  # ════════════════════════════════════════════════════════════════════
-  # STAGE 3 — CONTAINER IMAGE SECURITY
-  # ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
+# STAGE 3 — CONTAINER IMAGE SECURITY
+# ════════════════════════════════════════════════════════════════════
   container-scan:
     name: Stage 3 — Container Image Scan
     runs-on: ubuntu-latest
@@ -259,7 +249,6 @@ jobs:
           if [[ "${{ env.DOCKER_IMAGE }}" != *"@sha256:"* ]]; then
             echo "::warning::Docker image uses mutable tag"
           fi
-
       - name: Trivy — Scan Docker image for CVEs
         uses: aquasecurity/trivy-action@master
         with:
@@ -293,7 +282,6 @@ jobs:
             "scan_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF
-
       - name: Upload container scan reports
         uses: actions/upload-artifact@v4
         with:
@@ -301,9 +289,9 @@ jobs:
           path: ${{ env.REPORTS_DIR }}/
           retention-days: 30
 
-  # ════════════════════════════════════════════════════════════════════
-  # STAGE 4 — BUILD FIRMWARE
-  # ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
+# STAGE 4 — BUILD FIRMWARE
+# ════════════════════════════════════════════════════════════════════
   build:
     name: Stage 4 — Build Firmware (esp32c3)
     runs-on: ubuntu-latest
@@ -319,7 +307,6 @@ jobs:
           key: ccache-esp32c3-${{ github.sha }}
           restore-keys: |
             ccache-esp32c3-
-
       - name: Build ESP Matter Firmware (esp32c3)
         run: |
           mkdir -p ${{ env.FIRMWARE_DIR }}/esp32c3
@@ -354,7 +341,6 @@ jobs:
               cp build/*.map \
                 /workspace/${{ env.REPORTS_DIR }}/ 2>/dev/null || true
             "
-
       - name: Sign Firmware Binary (Secure Boot V2)
         run: |
           pip install esptool --quiet 2>/dev/null || true
@@ -373,7 +359,6 @@ jobs:
           else
             echo "::warning::FIRMWARE_SIGNING_KEY not configured — unsigned"
           fi
-
       - name: Write build manifest
         run: |
           cat > ${{ env.FIRMWARE_DIR }}/esp32c3/build-manifest.json << EOF
@@ -386,7 +371,6 @@ jobs:
             "builder": "github-actions"
           }
           EOF
-
       - name: Upload firmware (esp32c3)
         uses: actions/upload-artifact@v4
         with:
@@ -401,9 +385,9 @@ jobs:
           path: ${{ env.REPORTS_DIR }}/
           retention-days: 30
 
-  # ════════════════════════════════════════════════════════════════════
-  # STAGE 5 — TEST & QUALITY GATE
-  # ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
+# STAGE 5 — TEST & QUALITY GATE
+# ════════════════════════════════════════════════════════════════════
   test-and-quality:
     name: Stage 5 — Test & Quality Gate (esp32c3)
     runs-on: ubuntu-latest
@@ -418,6 +402,16 @@ jobs:
           name: firmware-esp32c3
           path: ${{ env.FIRMWARE_DIR }}/esp32c3/
 
+      # ─────────────────────────────────────────────────────────────
+      # Download generated test file from the PREVIOUS run.
+      # Strategy:
+      #   Run 1 (main): no artifact exists yet → step skipped → Stage AI generates tests
+      #   Run 2 (autofix/run-X): downloads from Run 1 (the first_run_id in branch name)
+      #   Run 3+: tries to find the most recent ai-agent-reports artifact
+      #
+      # Uses gh CLI (pre-installed on ubuntu-latest runners) with GITHUB_TOKEN.
+      # continue-on-error: true so Run 1 never fails here.
+      # ─────────────────────────────────────────────────────────────
       - name: Download generated tests from previous run (Run 2 critical)
         continue-on-error: true
         env:
@@ -432,23 +426,22 @@ jobs:
             echo "Run 2 detected — will download ai-agent-reports from Run 1: $TARGET_RUN"
           else
             # For Run 1 or other branches: find most recent completed run (not current)
-            TARGET_RUN=$(gh api \
-              "repos/${{ github.repository }}/actions/workflows/${{ env.WORKFLOW_FILE }}/runs?status=completed&per_page=10" \
-              --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }})][0].id" \
-              2>/dev/null || echo "")
+            TARGET_RUN=$(gh api               "repos/${{ github.repository }}/actions/workflows/${{ env.WORKFLOW_FILE }}/runs?status=completed&per_page=10"               --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }})][0].id"               2>/dev/null || echo "")
             echo "Run 1 — most recent previous run: ${TARGET_RUN:-none}"
           fi
           if [ -n "$TARGET_RUN" ] && [ "$TARGET_RUN" != "null" ]; then
-            gh run download "$TARGET_RUN" \
-              --name ai-agent-reports-esp32c3 \
-              --dir "${{ env.REPORTS_DIR }}/" \
-              2>/dev/null \
-              && echo "Downloaded ai-agent-reports from run $TARGET_RUN" \
-              || echo "No ai-agent-reports artifact in run $TARGET_RUN — Stage AI will generate tests this run"
+            gh run download "$TARGET_RUN"               --name ai-agent-reports-esp32c3               --dir "${{ env.REPORTS_DIR }}/"               2>/dev/null               && echo "Downloaded ai-agent-reports from run $TARGET_RUN"               || echo "No ai-agent-reports artifact in run $TARGET_RUN — Stage AI will generate tests this run"
           else
             echo "No previous run found — this is the first run, Stage AI will generate tests"
           fi
-
+      # ─────────────────────────────────────────────────────────────
+      # Test path A — Host-side fast unit tests
+      # ─────────────────────────────────────────────────────────────
+      # Generated tests are compiled with g++ against the small mock
+      # ESP-IDF runtime in test_runtime/. This gives the developer a
+      # ~30 second feedback loop on every PR. The QEMU integration
+      # path below covers what the mocks cannot (real ESP-IDF, Matter
+      # commissioning, NVS persistence).
       - name: Find or generate test file
         id: locate_test
         run: |
@@ -479,9 +472,8 @@ jobs:
             echo "    2. ${{ env.REPORTS_DIR }}/generated_tests_esp32c3.cpp"
             echo "    3. .autofix-reports/generated_tests_esp32c3.cpp"
           fi
-          echo "has_tests=$HAS_TESTS" >> $GITHUB_OUTPUT
-          echo "test_cpp=$TEST_CPP" >> $GITHUB_OUTPUT
-
+          echo "has_tests=$HAS_TESTS"  >> $GITHUB_OUTPUT
+          echo "test_cpp=$TEST_CPP"    >> $GITHUB_OUTPUT
       - name: Host-side unit test execution (g++ + mocks)
         if: steps.locate_test.outputs.has_tests == 'true'
         continue-on-error: true
@@ -519,7 +511,6 @@ jobs:
             "$LOG" \
             ${{ env.REPORTS_DIR }}/unit-test-results-host.json \
             host
-
       - name: Host-side test fallback report
         if: steps.locate_test.outputs.has_tests != 'true'
         run: |
@@ -530,7 +521,6 @@ jobs:
                     'note':'No test file present — Stage AI will generate one this run'},
                     open('${{ env.REPORTS_DIR }}/unit-test-results-host.json','w'), indent=2)
           "
-
       - name: Install Espressif QEMU for ESP32-C3
         continue-on-error: true
         run: |
@@ -561,7 +551,6 @@ jobs:
             echo "::warning::QEMU install failed — QEMU integration tests will be skipped"
             echo "QEMU_AVAILABLE=false" >> $GITHUB_ENV
           fi
-
       - name: Install esptool
         run: pip install esptool --quiet
 
@@ -575,88 +564,24 @@ jobs:
           PARTITION=$(find "$FW_DIR" -name "partition-table.bin" | head -1)
           APP=$(find "$FW_DIR" -maxdepth 1 -name "light.bin" | head -1)
           if [ -z "$APP" ]; then
-            APP=$(find "$FW_DIR" -maxdepth 1 -name "*.bin" \
-              ! -name "bootloader.bin" \
-              ! -name "partition-table.bin" \
-              ! -name "*-signed.bin" | head -1)
+            APP=$(find "$FW_DIR" -maxdepth 1 -name "*.bin"               ! -name "bootloader.bin" ! -name "partition-table.bin"               ! -name "*-signed.bin" | head -1)
           fi
+          OTA_DATA=$(find "$FW_DIR" -name "ota_data_initial.bin" | head -1)
           echo "Bootloader : $BOOTLOADER"
           echo "Partition  : $PARTITION"
           echo "App        : $APP"
+          echo "OTA data   : ${OTA_DATA:-not found}"
           if [ -z "$BOOTLOADER" ] || [ -z "$PARTITION" ] || [ -z "$APP" ]; then
             echo "::warning::Missing firmware binaries — QEMU will be skipped"
             echo "QEMU_SKIP=true" >> $GITHUB_ENV
           else
-            # FIX 4a: include ota_data_initial.bin at 0xd000 (required for Matter OTA)
-            OTA_DATA=$(find "$FW_DIR" -name "ota_data_initial.bin" | head -1)
-            echo "OTA data : ${OTA_DATA:-not found}"
-
-            # FIX 4b: try flasher_args.json first (has all correct addresses from build)
-            FLASHER_ARGS="$FW_DIR/flasher_args.json"
-            MERGE_OK=1
-            if [ -f "$FLASHER_ARGS" ]; then
-              echo "Using flasher_args.json for accurate flash addresses..."
-              python3 << 'PYEOF_MERGE'
-import json, subprocess, sys, os
-from pathlib import Path
-fw_dir = Path(os.environ.get("FW_DIR", "firmware/esp32c3"))
-args = json.loads((fw_dir / "flasher_args.json").read_text())
-flash_files = args.get("flash_files", {})
-if not flash_files:
-    sys.exit(1)
-out = fw_dir / "flash_image.bin"
-cmd = ["esptool", "--chip", "esp32c3", "merge-bin", "--output", str(out),
-       "--flash-mode", args.get("flash_mode","dio"),
-       "--flash-freq", args.get("flash_freq","80m"),
-       "--flash-size", args.get("flash_size","4MB")]
-for addr, fname in sorted(flash_files.items(), key=lambda x: int(x[0],16)):
-    fpath = fw_dir / fname
-    if fpath.exists():
-        cmd += [addr, str(fpath)]
-        print(f"  {addr}: {fname}")
-r = subprocess.run(cmd, capture_output=True, text=True)
-if r.returncode != 0:
-    print("esptool error:", r.stderr[:200])
-    sys.exit(1)
-print(f"Flash image: {out.stat().st_size} bytes")
-PYEOF_MERGE
-              MERGE_OK=$?
+            MERGE_DONE=false
+            if [ -n "$OTA_DATA" ]; then
+              esptool --chip esp32c3 merge-bin                 --output "$FW_DIR/flash_image.bin"                 --flash-mode dio --flash-freq 80m --flash-size 4MB                 0x0000 "$BOOTLOADER" 0x8000 "$PARTITION"                 0xd000 "$OTA_DATA" 0x10000 "$APP" 2>&1               && MERGE_DONE=true               || esptool.py --chip esp32c3 merge_bin                 --output "$FW_DIR/flash_image.bin"                 --flash_mode dio --flash_freq 80m --flash_size 4MB                 0x0000 "$BOOTLOADER" 0x8000 "$PARTITION"                 0xd000 "$OTA_DATA" 0x10000 "$APP"               && MERGE_DONE=true || true
             fi
-
-            # Fallback: manual merge with ota_data_initial.bin
-            if [ "$MERGE_OK" != "0" ] || [ ! -f "$FW_DIR/flash_image.bin" ]; then
-              echo "Fallback: manual merge..."
-              if [ -n "$OTA_DATA" ]; then
-                esptool --chip esp32c3 merge-bin \
-                  --output "$FW_DIR/flash_image.bin" \
-                  --flash-mode dio --flash-freq 80m --flash-size 4MB \
-                  0x0000  "$BOOTLOADER" \
-                  0x8000  "$PARTITION" \
-                  0xd000  "$OTA_DATA" \
-                  0x10000 "$APP" 2>&1 || \
-                esptool.py --chip esp32c3 merge_bin \
-                  --output "$FW_DIR/flash_image.bin" \
-                  --flash_mode dio --flash_freq 80m --flash_size 4MB \
-                  0x0000  "$BOOTLOADER" \
-                  0x8000  "$PARTITION" \
-                  0xd000  "$OTA_DATA" \
-                  0x10000 "$APP"
-              else
-                esptool --chip esp32c3 merge-bin \
-                  --output "$FW_DIR/flash_image.bin" \
-                  --flash-mode dio --flash-freq 80m --flash-size 4MB \
-                  0x0000  "$BOOTLOADER" \
-                  0x8000  "$PARTITION" \
-                  0x10000 "$APP" 2>&1 || \
-                esptool.py --chip esp32c3 merge_bin \
-                  --output "$FW_DIR/flash_image.bin" \
-                  --flash_mode dio --flash_freq 80m --flash_size 4MB \
-                  0x0000  "$BOOTLOADER" \
-                  0x8000  "$PARTITION" \
-                  0x10000 "$APP"
-              fi
+            if [ "$MERGE_DONE" = "false" ]; then
+              esptool --chip esp32c3 merge-bin                 --output "$FW_DIR/flash_image.bin"                 --flash-mode dio --flash-freq 80m --flash-size 4MB                 0x0000 "$BOOTLOADER" 0x8000 "$PARTITION"                 0x10000 "$APP" 2>&1               || esptool.py --chip esp32c3 merge_bin                 --output "$FW_DIR/flash_image.bin"                 --flash_mode dio --flash_freq 80m --flash_size 4MB                 0x0000 "$BOOTLOADER" 0x8000 "$PARTITION"                 0x10000 "$APP"
             fi
-
             if [ -f "$FW_DIR/flash_image.bin" ]; then
               echo "Flash image created: $(stat -c%s "$FW_DIR/flash_image.bin") bytes"
               echo "QEMU_SKIP=false" >> $GITHUB_ENV
@@ -665,7 +590,6 @@ PYEOF_MERGE
               echo "QEMU_SKIP=true" >> $GITHUB_ENV
             fi
           fi
-
       - name: Run firmware in QEMU (45 second window)
         if: env.QEMU_SKIP != 'true'
         run: |
@@ -683,7 +607,6 @@ PYEOF_MERGE
             2>&1 | tee -a ${{ env.REPORTS_DIR }}/qemu-run.log || true
           echo "======== QEMU SESSION END ========" \
             >> ${{ env.REPORTS_DIR }}/qemu-run.log
-
       - name: Parse QEMU UART log
         if: env.QEMU_SKIP != 'true'
         run: |
@@ -746,7 +669,6 @@ PYEOF_MERGE
           OUTFILE.write_text(json.dumps(findings, indent=2))
           print(findings["summary"])
           PYEOF
-
       - name: QEMU Quality Gate
         if: env.QEMU_SKIP != 'true'
         run: |
@@ -772,7 +694,14 @@ PYEOF_MERGE
             sys.exit(1)
           print("QEMU runtime gate passed")
           PYEOF
-
+      # ─────────────────────────────────────────────────────────────
+      # Test path B — QEMU integration tests (real ESP-IDF + Unity)
+      # ─────────────────────────────────────────────────────────────
+      # Compile the SAME test file inside the Docker image with the
+      # real ESP-IDF Unity component, merge the binaries, boot them
+      # in QEMU, capture the UART, parse Unity output. This catches
+      # bugs the host runtime cannot see (ESP-IDF behaviour, real
+      # cluster handlers, NVS, FreeRTOS scheduling).
       - name: QEMU integration test — build test firmware
         if: |
           steps.locate_test.outputs.has_tests == 'true' &&
@@ -792,7 +721,7 @@ PYEOF_MERGE
               ESP_TEST='/opt/espressif/esp-matter/examples/light/test'
               WORKSPACE_TEST='/workspace/esp-matter/examples/light/test'
               mkdir -p \"\$ESP_TEST/main\"
-              cp \"\$WORKSPACE_TEST/test_light_app_esp32c3.cpp\" \
+              cp \"\$WORKSPACE_TEST/test_light_app_esp32c3.cpp\" \\
                  \"\$ESP_TEST/main/\" 2>/dev/null || true
               # FIX — the generated test does #include \"mock_idf.h\".
               # On the host runner g++ gets -I test_runtime, but here
@@ -805,10 +734,10 @@ PYEOF_MERGE
                 fi
               done
               # Project-level CMakeLists
-              printf 'cmake_minimum_required(VERSION 3.16)\ninclude(\$ENV{IDF_PATH}/tools/cmake/project.cmake)\nproject(light_test)\n' \
+              printf 'cmake_minimum_required(VERSION 3.16)\ninclude(\$ENV{IDF_PATH}/tools/cmake/project.cmake)\nproject(light_test)\n' \\
                 > \"\$ESP_TEST/CMakeLists.txt\"
               # Component CMakeLists — link the REAL Unity component
-              printf 'idf_component_register(\n    SRCS \"test_light_app_esp32c3.cpp\"\n    INCLUDE_DIRS \".\"\n    REQUIRES unity esp_system\n)\n' \
+              printf 'idf_component_register(\n    SRCS \"test_light_app_esp32c3.cpp\"\n    INCLUDE_DIRS \".\"\n    REQUIRES unity esp_system\n)\n' \\
                 > \"\$ESP_TEST/main/CMakeLists.txt\"
               cd \"\$ESP_TEST\"
               idf.py set-target esp32c3
@@ -831,7 +760,6 @@ PYEOF_MERGE
             echo "build=failed" >> $GITHUB_OUTPUT
             echo "::warning::QEMU test firmware build failed — see qemu-test-build.log"
           fi
-
       - name: QEMU integration test — boot + capture UART
         if: |
           steps.locate_test.outputs.has_tests == 'true' &&
@@ -876,7 +804,6 @@ PYEOF_MERGE
             "$LOG" \
             ${{ env.REPORTS_DIR }}/unit-test-results-qemu.json \
             qemu
-
       - name: QEMU integration test — fallback report
         if: |
           steps.locate_test.outputs.has_tests != 'true' ||
@@ -931,7 +858,6 @@ PYEOF_MERGE
           print(f'QEMU fallback: status={status} boot_ok={boot_ok}')
           PYEOF
           SKIP_NOTE="$SKIP_NOTE" SKIP_STATUS="$SKIP_STATUS"
-
       - name: Aggregate test results (host + qemu)
         if: always()
         run: |
@@ -954,7 +880,6 @@ PYEOF_MERGE
           print(f\"host:   {d['runners']['host'].get('status')} ({d['runners']['host'].get('passed',0)}/{d['runners']['host'].get('total',0)})\")
           print(f\"qemu:   {d['runners']['qemu'].get('status')} ({d['runners']['qemu'].get('passed',0)}/{d['runners']['qemu'].get('total',0)})\")
           "
-
       - name: cppcheck Deep Static Analysis
         run: |
           sudo apt-get install -y cppcheck flawfinder -qq
@@ -981,12 +906,10 @@ PYEOF_MERGE
               ${{ env.EXAMPLE_PATH }}/main \
               > ${{ env.REPORTS_DIR }}/flawfinder-deep.html || true
           fi
-
       - name: Quality Gate — Enforce cppcheck
         run: |
           if [ -f ${{ env.REPORTS_DIR }}/cppcheck-deep.xml ]; then
-            ERROR_COUNT=$(grep -c 'severity="error"' \
-              ${{ env.REPORTS_DIR }}/cppcheck-deep.xml 2>/dev/null || echo 0)
+            ERROR_COUNT=$(grep -c 'severity="error"'               ${{ env.REPORTS_DIR }}/cppcheck-deep.xml 2>/dev/null || echo 0)
             echo "cppcheck errors: $ERROR_COUNT"
             if [ "$ERROR_COUNT" -gt "0" ]; then
               echo "::error::Quality gate failed — $ERROR_COUNT cppcheck error(s)"
@@ -999,12 +922,10 @@ PYEOF_MERGE
             echo "::warning::This is expected when esp-matter source is not in repo"
             echo "Quality gate: SKIPPED (no source to check)"
           fi
-
       - name: Install clang + fuzzing tools
         run: |
           sudo apt-get install -y clang llvm -qq
           clang --version
-
       - name: Prepare fuzzing workspace
         run: |
           mkdir -p fuzz/crashes fuzz/corpus ${{ env.REPORTS_DIR }}
@@ -1015,7 +936,6 @@ PYEOF_MERGE
           print('Auto seed corpus created')
           "
           fi
-
       - name: Compile fuzzing harness
         run: |
           clang++ -std=c++17 -g -O1 \
@@ -1029,7 +949,6 @@ PYEOF_MERGE
             echo "::error::Fuzzer compilation failed"
             exit 1
           fi
-
       - name: Run libFuzzer (90 second window)
         run: |
           echo "======== FUZZER SESSION START ========" \
@@ -1042,14 +961,12 @@ PYEOF_MERGE
             2>&1 | tee -a ${{ env.REPORTS_DIR }}/fuzz-raw.log || true
           echo "======== FUZZER SESSION END ========" \
             >> ${{ env.REPORTS_DIR }}/fuzz-raw.log
-
       - name: Parse fuzzer results
         run: |
           python3 fuzz/parse_fuzz_results.py \
             ${{ env.REPORTS_DIR }}/fuzz-raw.log \
             fuzz/crashes \
             ${{ env.REPORTS_DIR }}/fuzz-report-esp32c3.json
-
       - name: Fuzzer quality gate
         run: |
           python3 << 'PYEOF'
@@ -1066,7 +983,13 @@ PYEOF_MERGE
             sys.exit(1)
           print(f"Fuzzer gate passed — 0 crashes in {r.get('executions',0):,} executions")
           PYEOF
-
+      # ─────────────────────────────────────────────────────────────
+      # FAULT INJECTION (Track D — QEMU + GDB simulation)
+      # Runs tools/fault_injector.py which executes all fault scenarios
+      # (memory, NVS, Matter attrs) against the firmware via QEMU+GDB.
+      # Falls back to simulation mode if GDB/ELF not available.
+      # Writes: reports/fault-injection-report-esp32c3.json
+      # ─────────────────────────────────────────────────────────────
       - name: Run Fault Injection Engine (Track D)
         continue-on-error: true
         run: |
@@ -1094,12 +1017,12 @@ PYEOF_MERGE
           fi
           # Always produce a valid JSON report (fallback if script failed/missing)
           if [ ! -f "${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json" ]; then
-            python3 -c "import json; json.dump({'target':'esp32c3','total_scenarios':0,'passed':0,'failed':0,'overall_status':'not_run','critical_failures':[],'high_failures':[],'by_family':{},'scenarios':[],'summary':'Fault injection not run.'}, open('${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json','w'), indent=2)"
+            python3 -c "import json; json.dump({'target':'esp32c3','total_scenarios':0,'passed':0,'failed':0,'overall_status':'not_run','critical_failures':[],'high_failures':[],'by_family':{},'scenarios':[],'summary':'Fault injection not run.'}, open('${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json','w'), indent=2)" 
             echo "Fallback fault-injection report written"
           fi
           # Show summary
           python3 -c "import json; d=json.load(open('${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json')); print('Fault injection: '+str(d.get('passed',0))+'/'+str(d.get('total_scenarios',0))+' passed | status='+str(d.get('overall_status','?')))" 2>/dev/null || true
-
+      # ── HIL SIMULATION — QEMU proxy test (fixed: no matrix, correct paths) ──
       - name: HIL Simulation — QEMU proxy test
         id: hil_sim
         continue-on-error: true
@@ -1110,23 +1033,13 @@ PYEOF_MERGE
           FLASH_IMG="${{ env.FIRMWARE_DIR }}/esp32c3/flash_image.bin"
           if [ ! -f "$FLASH_IMG" ] || [ "${{ env.QEMU_SKIP }}" = "true" ] || [ "${{ env.QEMU_AVAILABLE }}" = "false" ]; then
             echo "HIL skipped — flash image not available or QEMU not installed"
-            python3 -c "
-import json
-json.dump({'status':'skipped','reason':'flash image not available or QEMU not installed',
-           'device':'esp32c3-qemu-proxy','tests_run':0,'tests_passed':0,
-           'tests_failed':0,'duration_s':0,'failures':[]},
-          open('$REPORT','w'), indent=2)
-"
+            echo '{"status":"skipped","reason":"flash image not available or QEMU not installed","device":"esp32c3-qemu-proxy","tests_run":0,"tests_passed":0,"tests_failed":0,"duration_s":0,"failures":[]}' > "$REPORT"
           else
             echo "=== HIL Simulation via QEMU for esp32c3 ==="
             START=$(date +%s)
             PASS=0; FAIL=0
             declare -a FAILURES=()
-            BOOT_LOG=$(timeout 60 qemu-system-riscv32 \
-              -nographic -no-reboot \
-              -machine esp32c3 \
-              -drive file="$FLASH_IMG",if=mtd,format=raw \
-              -serial stdio 2>&1 || true)
+            BOOT_LOG=$(timeout 60 qemu-system-riscv32               -nographic -no-reboot               -machine esp32c3               -drive file="$FLASH_IMG",if=mtd,format=raw               -serial stdio 2>&1 || true)
             # Test 1: boot sequence
             if echo "$BOOT_LOG" | grep -qE "app_main|cpu_start:|ESP-IDF|I \("; then
               PASS=$((PASS+1)); echo "  [HIL-1] boot_sequence: PASS"
@@ -1149,16 +1062,9 @@ json.dump({'status':'skipped','reason':'flash image not available or QEMU not in
             TOTAL=$((PASS+FAIL)); STATUS="pass"; [ $FAIL -gt 0 ] && STATUS="fail"
             PASS_RATE=0; [ $TOTAL -gt 0 ] && PASS_RATE=$(echo "scale=1; $PASS*100/$TOTAL" | bc 2>/dev/null || echo 0)
             FAIL_JSON="["; SEP=""
-            for f in "${FAILURES[@]}"; do FAIL_JSON+="${SEP}\"${f}\""; SEP=","; done
+            for f in "${FAILURES[@]}"; do FAIL_JSON+="${SEP}"${f}""; SEP=","; done
             FAIL_JSON+="]"
-            python3 -c "
-import json
-json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
-           'tests_run':$TOTAL,'tests_passed':$PASS,'tests_failed':$FAIL,
-           'pass_rate':$PASS_RATE,'duration_s':$((END-START)),
-           'test_scenarios':['boot_sequence','no_panic_at_boot','matter_stack_init'],
-           'failures':$FAIL_JSON}, open('$REPORT','w'), indent=2)
-"
+            printf '{"status":"%s","device":"esp32c3-qemu-proxy","tests_run":%s,"tests_passed":%s,"tests_failed":%s,"pass_rate":%s,"duration_s":%s,"test_scenarios":["boot_sequence","no_panic_at_boot","matter_stack_init"],"failures":%s}\n'               "$STATUS" "$TOTAL" "$PASS" "$FAIL" "$PASS_RATE" "$((END-START))" "$FAIL_JSON"               > "$REPORT"
             echo "HIL: $STATUS ($PASS/$TOTAL)"
           fi
           cat "$REPORT"
@@ -1188,9 +1094,9 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
             ${{ env.REPORTS_DIR }}/hil-report-esp32c3.json
           retention-days: 30
 
-  # ════════════════════════════════════════════════════════════════════
-  # STAGE 6 — FIRMWARE SECURITY AUDIT
-  # ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
+# STAGE 6 — FIRMWARE SECURITY AUDIT
+# ════════════════════════════════════════════════════════════════════
   firmware-security-audit:
     name: Stage 6 — Firmware Security Audit (esp32c3)
     runs-on: ubuntu-latest
@@ -1209,7 +1115,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
         run: |
           python3 -m pip install --upgrade pip
           pip install esptool pyelftools
-
       - name: Binary Security Properties Check
         run: |
           mkdir -p ${{ env.REPORTS_DIR }}
@@ -1224,7 +1129,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
             json.dump(report, f, indent=2)
           print(json.dumps(report, indent=2))
           PYEOF
-
       - name: ESP Binary Header Validation
         run: |
           for bin in ${{ env.FIRMWARE_DIR }}/esp32c3/*.bin; do
@@ -1232,7 +1136,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
             echo "--- $bin ---"
             python3 -m esptool image_info "$bin" 2>/dev/null || true
           done
-
       - name: Compute firmware hashes for SLSA
         run: |
           mkdir -p ${{ env.REPORTS_DIR }}
@@ -1243,7 +1146,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
             echo "$H $NAME" >> ${{ env.REPORTS_DIR }}/firmware-sha256.txt
             echo "SHA256($NAME) = $H"
           done
-
       - name: License Compliance Gate
         run: |
           UNLICENSED=$(find ${{ env.EXAMPLE_PATH }} \
@@ -1257,7 +1159,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           else
             echo "License compliance passed"
           fi
-
       - name: Upload firmware audit reports
         uses: actions/upload-artifact@v4
         with:
@@ -1265,9 +1166,9 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           path: ${{ env.REPORTS_DIR }}/
           retention-days: 90
 
-  # ════════════════════════════════════════════════════════════════════
-  # STAGE AI — AUTONOMOUS AI ANALYSIS (Agents 1-8)
-  # ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
+# STAGE AI — AUTONOMOUS AI ANALYSIS (Agents 1-8)
+# ════════════════════════════════════════════════════════════════════
   ai-agents:
     name: Stage AI — Autonomous Agent Analysis (esp32c3)
     runs-on: ubuntu-latest
@@ -1299,15 +1200,11 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
         run: |
           mkdir -p ${{ env.REPORTS_DIR }}
           if [ ! -f ${{ env.REPORTS_DIR }}/run-history.json ]; then
-            echo '{"runs":[],"run_count":0}' \
-              > ${{ env.REPORTS_DIR }}/run-history.json
+            echo '{"runs":[],"run_count":0}'               > ${{ env.REPORTS_DIR }}/run-history.json
             echo "First run — baseline history created"
           else
-            echo "History found: $(cat ${{ env.REPORTS_DIR }}/run-history.json \
-              | python3 -c 'import json,sys; d=json.load(sys.stdin); \
-              print(str(d.get("run_count",0)) + " run(s)")')"
+            echo "History found: $(cat ${{ env.REPORTS_DIR }}/run-history.json               | python3 -c 'import json,sys; d=json.load(sys.stdin);               print(str(d.get("run_count",0)) + " run(s)")')"
           fi
-
       - name: Download lint reports (Stage 1)
         uses: actions/download-artifact@v4
         with:
@@ -1363,17 +1260,7 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           ls -la ${{ env.REPORTS_DIR }}/ 2>/dev/null || echo "No reports dir"
           echo ""
           echo "=== Key reports status ==="
-          for f in \
-            build-esp32c3.log \
-            size-esp32c3.txt \
-            unit-test-results.json \
-            qemu-dynamic-report.json \
-            cppcheck-deep.xml \
-            sbom-spdx.json \
-            gitleaks-report.json \
-            grype-report.json \
-            container-scan-summary.json \
-            firmware-sha256.txt; do
+          for f in             build-esp32c3.log             size-esp32c3.txt             unit-test-results.json             qemu-dynamic-report.json             cppcheck-deep.xml             sbom-spdx.json             gitleaks-report.json             grype-report.json             container-scan-summary.json             firmware-sha256.txt; do
             if [ -f "${{ env.REPORTS_DIR }}/$f" ]; then
               SIZE=$(wc -c < "${{ env.REPORTS_DIR }}/$f")
               echo "  OK ($SIZE bytes): $f"
@@ -1383,13 +1270,11 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           done
           echo "=== Firmware ==="
           ls -la ${{ env.FIRMWARE_DIR }}/esp32c3/ 2>/dev/null || echo "No firmware"
-
       - name: Install AI agent dependencies
         run: |
           python3 -m pip install --upgrade pip
           pip install langchain langchain-core langchain-groq langgraph \
             chromadb python-dotenv pydantic
-
       - name: Configure agent environment
         run: |
           printf 'GROQ_API_KEY=%s\n' "${{ secrets.GROQ_API_KEY1 }}" > .env
@@ -1403,7 +1288,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
             echo "::error::GROQ_API_KEY is empty — add it in Settings > Secrets > Actions"
             exit 1
           fi
-
       - name: Expose ESP-Matter source for agents
         run: |
           mkdir -p esp-matter/examples/light/main
@@ -1416,7 +1300,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
                 /workspace/esp-matter/examples/light/main/ 2>/dev/null || true
             "
           ls esp-matter/examples/light/main/ 2>/dev/null || echo "No files"
-
       - name: Pre-flight check (agents + secrets + files)
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY1 }}
@@ -1434,17 +1317,7 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           fi
           # 2. Required agent files
           MISSING=0
-          for f in \
-            supervisor/orchestrator.py \
-            agents/debug_agent.py \
-            agents/security_agent.py \
-            agents/code_review_agent.py \
-            agents/test_gen_agent.py \
-            agents/optimization_agent.py \
-            agents/release_agent.py \
-            agents/fault_analysis_agent.py \
-            agents/autofix_agent.py \
-            agents/regression_detector.py; do
+          for f in             supervisor/orchestrator.py             agents/debug_agent.py             agents/security_agent.py             agents/code_review_agent.py             agents/test_gen_agent.py             agents/optimization_agent.py             agents/release_agent.py             agents/fault_analysis_agent.py             agents/autofix_agent.py             agents/regression_detector.py; do
             if [ -f "$f" ]; then
               echo "  OK: $f"
             else
@@ -1465,7 +1338,12 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
             echo "  ::warning::Use the updated orchestrator.py from Claude artifacts"
           fi
           echo "=== Pre-flight passed ==="
-
+      # ════════════════════════════════════════════════════════════
+      # ✅ UPDATED STEP v5 — Run AI Agents Orchestrator
+      # FIX: robust JSON parsing without nested shell quoting issues,
+      #      explicit error handling if pipeline-summary.json missing,
+      #      full debug dump always visible.
+      # ════════════════════════════════════════════════════════════
       - name: Run AI Agents Orchestrator (Agents 1-8 + AutoFix)
         id: run_agents
         env:
@@ -1525,7 +1403,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           echo ""
           echo "=== pipeline-summary.json ==="
           python3 -m json.tool "$SUMMARY_FILE" 2>/dev/null || cat "$SUMMARY_FILE"
-
       - name: Regression Detection
         if: always()
         run: |
@@ -1558,7 +1435,9 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           except Exception as e:
             print(f"::warning::Regression detection error: {e}")
           PYEOF
-
+      # ════════════════════════════════════════════════════════════
+      # ✅ UPDATED STEP v5 — Post AI Summary to GitHub Step Summary
+      # ════════════════════════════════════════════════════════════
       - name: Post AI Summary to GitHub
         if: always()
         run: |
@@ -1692,7 +1571,9 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
               f.write("\n".join(lines) + "\n")
           print("GitHub Step Summary written successfully")
           SUMMARY_EOF
-
+      # ════════════════════════════════════════════════════════════
+      # ✅ UPDATED STEP v5 — Post AI Results as PR Comment
+      # ════════════════════════════════════════════════════════════
       - name: Post AI Results as PR Comment
         if: github.event_name == 'pull_request' && always()
         uses: actions/github-script@v7
@@ -1733,7 +1614,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
               issue_number: context.issue.number,
               body
             });
-
       - name: Upload orchestrator log (always — pour debug)
         uses: actions/upload-artifact@v4
         if: always()
@@ -1782,8 +1662,8 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
             ${{ env.REPORTS_DIR }}/run-history.json
           retention-days: 90
 
-  # STAGE 4b — APPLY AUTOFIX PATCHES & REBUILD
-  # ════════════════════════════════════════════════════════════════════
+# STAGE 4b — APPLY AUTOFIX PATCHES & REBUILD
+# ════════════════════════════════════════════════════════════════════
   build-second-run:
     name: Stage 4b — Apply AutoFix Patches & Rebuild
     runs-on: ubuntu-latest
@@ -1821,7 +1701,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           except Exception as e:
             print(f'Non disponible: {e}')
           " 2>/dev/null || true
-
       - name: Cache ccache
         uses: actions/cache@v4
         with:
@@ -1829,7 +1708,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           key: ccache-esp32c3-${{ github.sha }}
           restore-keys: |
             ccache-esp32c3-
-
       - name: Apply AutoFix patches & rebuild in Docker
         id: apply
         run: |
@@ -1899,7 +1777,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
             ${{ env.REPORTS_DIR }}/build-patched-esp32c3.log 2>/dev/null \
             | tail -1 || echo "0")
           echo "patches_applied=$APPLIED" >> $GITHUB_OUTPUT
-
       - name: Check rebuild result
         id: rebuild
         run: |
@@ -1912,7 +1789,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
             echo "::warning::Patches may be invalid but tests can still be committed"
             echo "build_status=success" >> $GITHUB_OUTPUT
           fi
-
       - name: Upload patched firmware + logs
         uses: actions/upload-artifact@v4
         if: always()
@@ -1924,12 +1800,12 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
             ${{ env.REPORTS_DIR }}/size-patched-esp32c3.txt
           retention-days: 30
 
-  # ════════════════════════════════════════════════════════════════════
-  # STAGE SYNC — Copy ESP-Matter source into repo (run once manually)
-  # Triggered by: workflow_dispatch with reason="sync-esp-matter-source"
-  # After this job, esp-matter/examples/light/main/ exists in the repo
-  # and Stage 4c can apply patches directly without Docker.
-  # ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
+# STAGE SYNC — Copy ESP-Matter source into repo (run once manually)
+# Triggered by: workflow_dispatch with reason="sync-esp-matter-source"
+# After this job, esp-matter/examples/light/main/ exists in the repo
+# and Stage 4c can apply patches directly without Docker.
+# ════════════════════════════════════════════════════════════════════
   sync-esp-matter-source:
     name: Sync — Copy ESP-Matter source into repo
     runs-on: ubuntu-latest
@@ -1958,17 +1834,16 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
               SRC='/opt/espressif/esp-matter/examples/light/main'
               DEST='/workspace/esp-matter/examples/light/main'
               echo 'Files in container:'
-              ls \"\$SRC\"
-              cp -r \"\$SRC\"/* \"\$DEST\"/
+              ls \"\\$SRC\"
+              cp -r \"\\$SRC\"/* \"\\$DEST\"/
               cp /opt/espressif/esp-matter/examples/light/CMakeLists.txt \
                  /workspace/esp-matter/examples/light/ 2>/dev/null || true
               echo 'Done. Files copied:'
-              ls \"\$DEST\"
+              ls \"\\$DEST\"
             "
           echo "=== Files copied ==="
           ls -la esp-matter/examples/light/main/
           echo "Total: $(ls esp-matter/examples/light/main/ | wc -l) files"
-
       - name: Create .gitignore and README
         run: |
           cat > esp-matter/.gitignore << 'GITEOF'
@@ -1993,7 +1868,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           ## DO NOT EDIT MANUALLY
           These files are managed by the DevSecOps pipeline AutoFix Agent.
           READEOF
-
       - name: Commit and push ESP-Matter source
         run: |
           git config user.name  "DevSecOps Bot"
@@ -2014,12 +1888,11 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           git push origin ${{ github.ref_name }}
           echo "Source committed and pushed to ${{ github.ref_name }}"
           echo "Stage 4c will now work on next pipeline run."
-
-  # ════════════════════════════════════════════════════════════════════
-  # STAGE 4c — OPTION C : FULL SECOND RUN (push branche autofix)
-  # Déclenche un pipeline CI COMPLET avec agents AI sur le code patché
-  # Nécessite le secret PAT_TOKEN (repo + workflow permissions)
-  # ════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
+# STAGE 4c — OPTION C : FULL SECOND RUN (push branche autofix)
+# Déclenche un pipeline CI COMPLET avec agents AI sur le code patché
+# Nécessite le secret PAT_TOKEN (repo + workflow permissions)
+# ════════════════════════════════════════════════════════════════════
   full-second-run:
     name: Stage 4c — Full Second Run (Option C)
     runs-on: ubuntu-latest
@@ -2068,15 +1941,12 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
                 echo "  OK (direct — repo file)"
                 APPLIED=$((APPLIED+1))
               # Method 2: patch -p1 with esp-matter dir (for C++ sources)
-              elif [ "$SOURCE_FILES" -gt "0" ] && \
-                   patch --dry-run -p1 -d esp-matter/examples/light < "$PATCH" 2>/dev/null; then
+              elif [ "$SOURCE_FILES" -gt "0" ] &&                    patch --dry-run -p1 -d esp-matter/examples/light < "$PATCH" 2>/dev/null; then
                 patch -p1 -d esp-matter/examples/light < "$PATCH"
                 echo "  OK (esp-matter source)"
                 APPLIED=$((APPLIED+1))
               # Method 3: git apply with directory prefix (fallback)
-              elif [ "$SOURCE_FILES" -gt "0" ] && \
-                   git apply --check -p1 \
-                     --directory=esp-matter/examples/light "$PATCH" 2>/dev/null; then
+              elif [ "$SOURCE_FILES" -gt "0" ] &&                    git apply --check -p1                      --directory=esp-matter/examples/light "$PATCH" 2>/dev/null; then
                 git apply -p1 --directory=esp-matter/examples/light "$PATCH"
                 echo "  OK (git apply --directory)"
                 APPLIED=$((APPLIED+1))
@@ -2108,7 +1978,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           echo "Result: applied=$APPLIED skipped=$SKIPPED tests=$TESTS_ADDED"
           echo "applied=$APPLIED"      >> $GITHUB_OUTPUT
           echo "tests_added=$TESTS_ADDED" >> $GITHUB_OUTPUT
-
       - name: Créer branche autofix et pusher
         id: push_branch
         if: steps.apply_local.outputs.applied != '0' || steps.apply_local.outputs.tests_added == 'true'
@@ -2152,7 +2021,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           echo "pushed=true"   >> $GITHUB_OUTPUT
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
           echo "Branch pushed: $BRANCH"
-
       - name: Créer la Pull Request automatique
         if: steps.push_branch.outputs.pushed == 'true'
         uses: actions/github-script@v7
@@ -2223,7 +2091,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
             } catch(e) {
               console.log(`Label note: ${e.message}`);
             }
-
       - name: Stage 4c Summary
         if: always()
         run: |
@@ -2241,7 +2108,6 @@ json.dump({'status':'$STATUS','device':'esp32c3-qemu-proxy',
           > Le push sur \`${BRANCH:-N/A}\` déclenche automatiquement
           > le pipeline complet (stages 1→AI) avec les corrections.
           > Merger la PR si tous les scores s'améliorent.
-          EOF
           EOF
 # ════════════════════════════════════════════════════════════════════
 # STAGE 7 — RELEASE
