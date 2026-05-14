@@ -1,0 +1,113 @@
+{
+  "target": "esp32c3",
+  "version": "v79",
+  "pipeline_passed": true,
+  "errors_found": true,
+  "second_run_ready": true,
+  "block_reason": "1 hardcoded secret(s) found in source code (qemu_fault_runner.py). AutoFix generated 2 patch(es) to fix them. | Code quality score too low: 4/10 (threshold: 5/10).",
+  "agents_run": 8,
+  "stage_results": {
+    "code_quality": {
+      "score": 4,
+      "quality_score": 4,
+      "issues": 0
+    },
+    "security": {
+      "score": 0,
+      "cves": 0,
+      "secrets": 1,
+      "secrets_found": 1,
+      "secrets_in_patches": 0,
+      "real_secrets": [
+        {
+          "type": "generic-api-key",
+          "rule": "generic-api-key",
+          "file": "tools/qemu_fault_runner.py",
+          "line": 117,
+          "match": "nvs_key_not_found : REDACTED",
+          "risk": "critical",
+          "action": "Remove from code, rotate the secret, use env var via os.environ.get('VAR', '')"
+        }
+      ],
+      "intentional_bug_demo": false
+    },
+    "build": {
+      "status": "success"
+    },
+    "memory": {
+      "flash_pct": 43.9
+    },
+    "tests": {
+      "generated": 4,
+      "deployed": true,
+      "executed": 0,
+      "passed": 0,
+      "failed": 0,
+      "status": "pending_run2",
+      "test_cases": [
+        {
+          "name": "test_on_off_cluster_toggle",
+          "type": "unit",
+          "area": "on_off"
+        },
+        {
+          "name": "test_null_endpoint_handled",
+          "type": "robustness",
+          "area": "matter_null_endpoint"
+        },
+        {
+          "name": "test_malloc_exhaustion_graceful",
+          "type": "robustness",
+          "area": "memory"
+        },
+        {
+          "name": "test_stack_overflow_detection",
+          "type": "robustness",
+          "area": "stack"
+        }
+      ]
+    },
+    "fault_injection": {
+      "total": 10,
+      "passed": 9,
+      "status": "critical_fail",
+      "robustness_score": 7,
+      "dynamic_score": 4
+    },
+    "autofix": {
+      "patches_generated": 2,
+      "patch_files": [
+        "autofix-esp32c3-01-security-tools_qemu_fault_runner.py.patch",
+        "autofix-esp32c3-05-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch"
+      ],
+      "issues_analyzed": 5,
+      "status": "patches_generated",
+      "patches_detail": [
+        {
+          "patch_name": "autofix-esp32c3-01-security-tools_qemu_fault_runner.py.patch",
+          "file": "tools/qemu_fault_runner.py",
+          "source_agent": "security",
+          "severity": "critical",
+          "description": "Hardcoded generic-api-key detected in qemu_fault_runner.py line 117. Action: Remove from code, rotate the secret, use env var via os.environ.get('VAR', '')",
+          "fix_method": "llm",
+          "valid": false
+        },
+        {
+          "patch_name": "autofix-esp32c3-05-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch",
+          "file": "esp-matter/examples/light/main/app_main.cpp",
+          "source_agent": "fault_analysis",
+          "severity": "medium",
+          "description": "insufficient stack size or incorrect stack usage",
+          "fix_method": "llm",
+          "valid": false
+        }
+      ],
+      "manual_count": 3,
+      "fix_method": "llm"
+    },
+    "release": {
+      "version": "v79",
+      "canary_deploy": "simulated"
+    }
+  }
+}

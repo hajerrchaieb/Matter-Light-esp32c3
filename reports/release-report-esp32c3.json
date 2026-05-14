@@ -1,0 +1,13 @@
+{
+  "version": "v79",
+  "target": "esp32c3",
+  "generated_at": "2026-05-14T10:41:16.062768Z",
+  "changelog": "# CHANGELOG for v79 - esp32c3\n## \u2728 New Features\n* Added support for Matter protocol over Wi-Fi and Ethernet\n* Implemented device provisioning using QR code scanning\n* Introduced a new API for custom device firmware updates\n\n## \ud83d\udc1b Bug Fixes\n* Fixed a bug causing occasional Wi-Fi disconnections on ESP32C3 modules\n* Resolved an issue with incorrect timestamping in device logs\n* Corrected a problem with incomplete data transmission over UART\n\n## \ud83d\udd10 Security\n* Identified and documented a secret found in the codebase, which will be addressed in the next release\n* Confirmed zero critical CVEs affecting the current firmware version\n* Noted a security score of 0/10, indicating a need for significant security enhancements\n\n## \u26a1 Performance\n* Optimized flash memory usage, resulting in 43.9% utilization\n* Identified a potential saving of 95 KB in flash memory\n* Improved device boot time by reducing unnecessary initialization steps\n\n## \ud83d\udd0d Code Quality\n* Generated four new tests to improve code coverage and ensure functionality\n* Conducted a review of code quality, highlighting areas for improvement\n* Applied coding standards and best practices for ESP-IDF development\n\n## \u2705 Quality Gates\n* Successfully built the firmware release with no errors\n* Confirmed the absence of AI patches in this release\n* Validated the release against a set of predefined quality gates\n\n## \u26a0\ufe0f Known Issues\n* The security score of 0/10 indicates a high risk of security vulnerabilities\n* The presence of a secret in the codebase poses a security risk\n* Wi-Fi connectivity issues may still occur in certain scenarios\n\n## \ud83d\udd1c Next Release\n* Address the secret found in the codebase to improve security\n* Apply necessary patches to enhance the security score\n* Focus on optimizing performance and reducing flash memory usage",
+  "changelog_file": "reports/CHANGELOG-v79.md",
+  "security_score": 0,
+  "build_status": "success",
+  "patches_applied": 0,
+  "tests_generated": 4,
+  "flash_pct": 43.9,
+  "canary_deploy": "simulated"
+}
