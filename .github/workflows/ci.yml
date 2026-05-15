@@ -2,10 +2,10 @@ name: ESP32 Matter — DevSecOps Full Lifecycle
 
 on:
   push:
-    branches: [ main, develop ]
-    tags: [ 'v*.*.*' ]
+    branches: [main, develop]
+    tags: ['v*.*.*']
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
   schedule:
     - cron: '0 2 * * 1'
   workflow_dispatch:
@@ -559,90 +559,48 @@ jobs:
           mkdir -p ${{ env.REPORTS_DIR }}
           FW_DIR="${{ env.FIRMWARE_DIR }}/esp32c3"
           echo "Firmware files:"
-          ls -la "$FW_DIR/"
-
-          # ── FIX QEMU NO_BOOT 1/3 : lire flasher_args.json ─────────────────
-          # flasher_args.json contient TOUS les binaires avec leurs offsets exacts
-          # Sans ota_data_initial.bin@0xd000, ESP32-C3 Matter ne boot pas
-          FLASHER_ARGS="$FW_DIR/flasher_args.json"
-          if [ -f "$FLASHER_ARGS" ]; then
-            echo "Reading offsets from flasher_args.json..."
-            MERGE_ARGS=$(python3 -c "
-import json, sys
-from pathlib import Path
-fw_dir = Path('$FW_DIR')
-fa = json.loads((fw_dir / 'flasher_args.json').read_text())
-parts = sorted(fa.get('flash_files', {}).items(), key=lambda x: int(x[0], 16))
-args = []
-for offset, fname in parts:
-    fpath = fw_dir / fname
-    if fpath.exists():
-        args.append(f'{offset} {fpath}')
-        print(f'  + {offset}: {fname}', file=sys.stderr)
-    else:
-        print(f'  SKIP (missing): {fname}', file=sys.stderr)
-print(' '.join(args))
-" 2>&1 >/tmp/qemu_merge_args.txt; cat /tmp/qemu_merge_args.txt; python3 -c "
-import json, sys
-from pathlib import Path
-fw_dir = Path('$FW_DIR')
-fa = json.loads((fw_dir / 'flasher_args.json').read_text())
-parts = sorted(fa.get('flash_files', {}).items(), key=lambda x: int(x[0], 16))
-args = []
-for offset, fname in parts:
-    fpath = fw_dir / fname
-    if fpath.exists():
-        args.append(f'{offset} {fpath}')
-print(' '.join(args))
-")
-            if [ -n "$MERGE_ARGS" ]; then
-              esptool --chip esp32c3 merge-bin \
-                --output "$FW_DIR/flash_image.bin" \
-                --flash-mode dio \
-                --flash-freq 80m \
-                --flash-size 4MB \
-                $MERGE_ARGS
-              echo "Flash image created from flasher_args.json (all partitions)"
-              echo "QEMU_SKIP=false" >> $GITHUB_ENV
-            else
-              echo "::error::No valid flash files from flasher_args.json"
-              echo "QEMU_SKIP=true" >> $GITHUB_ENV
-            fi
+          ls -la "$FW_DIR/" || true
+          BOOTLOADER=$(find "$FW_DIR" -name "bootloader.bin" | head -1)
+          PARTITION=$(find "$FW_DIR" -name "partition-table.bin" | head -1)
+          OTA_DATA=$(find "$FW_DIR" -name "ota_data_initial.bin" | head -1)
+          APP=$(find "$FW_DIR" -maxdepth 1 -name "light.bin" | head -1)
+          if [ -z "$APP" ]; then
+            APP=$(find "$FW_DIR" -maxdepth 1 -name "*.bin" \
+              ! -name "bootloader.bin" \
+              ! -name "partition-table.bin" \
+              ! -name "ota_data_initial.bin" \
+              ! -name "*-signed.bin" | head -1)
+          fi
+          echo "Bootloader : $BOOTLOADER"
+          echo "Partition  : $PARTITION"
+          echo "OTA data   : ${OTA_DATA:-(not found)}"
+          echo "App        : $APP"
+          if [ -z "$BOOTLOADER" ] || [ -z "$PARTITION" ] || [ -z "$APP" ]; then
+            echo "::warning::Missing firmware binaries — QEMU will be skipped"
+            echo "QEMU_SKIP=true" >> $GITHUB_ENV
           else
-            # Fallback manuel avec ota_data_initial.bin
-            echo "::warning::No flasher_args.json — using manual offsets with ota_data"
-            BOOTLOADER=$(find "$FW_DIR" -name "bootloader.bin" | head -1)
-            PARTITION=$(find "$FW_DIR" -name "partition-table.bin" | head -1)
-            OTA_DATA=$(find "$FW_DIR" -name "ota_data_initial.bin" | head -1)
-            APP=$(find "$FW_DIR" -maxdepth 1 -name "light.bin" | head -1)
-            [ -z "$APP" ] && APP=$(find "$FW_DIR" -maxdepth 1 -name "*.bin" \
-              ! -name "bootloader.bin" ! -name "partition-table.bin" \
-              ! -name "*-signed.bin" ! -name "ota_data_initial.bin" | head -1)
-            echo "Bootloader : $BOOTLOADER"
-            echo "Partition  : $PARTITION"
-            echo "OTA data   : ${OTA_DATA:-(not found)}"
-            echo "App        : $APP"
-            if [ -z "$BOOTLOADER" ] || [ -z "$PARTITION" ] || [ -z "$APP" ]; then
-              echo "::warning::Missing firmware binaries — QEMU will be skipped"
-              echo "QEMU_SKIP=true" >> $GITHUB_ENV
+            OTA_ARGS=""
+            if [ -n "$OTA_DATA" ]; then
+              OTA_ARGS="0xd000 $OTA_DATA"
+              echo "Including ota_data_initial.bin at 0xd000"
             else
-              OTA_ARGS=""
-              [ -n "$OTA_DATA" ] && OTA_ARGS="0xd000 $OTA_DATA"
-              esptool --chip esp32c3 merge-bin \
-                --output "$FW_DIR/flash_image.bin" \
-                --flash-mode dio --flash-freq 80m --flash-size 4MB \
-                0x0     "$BOOTLOADER" \
-                0x8000  "$PARTITION" \
-                $OTA_ARGS \
-                0x10000 "$APP"
-              echo "Flash image created (manual offsets)"
-              echo "QEMU_SKIP=false" >> $GITHUB_ENV
+              echo "::warning::ota_data_initial.bin not found"
             fi
+            esptool --chip esp32c3 merge-bin \
+              --output "$FW_DIR/flash_image.bin" \
+              --flash-mode dio \
+              --flash-freq 80m \
+              --flash-size 4MB \
+              0x0     "$BOOTLOADER" \
+              0x8000  "$PARTITION" \
+              $OTA_ARGS \
+              0x10000 "$APP"
+            echo "Flash image created"
+            echo "QEMU_SKIP=false" >> $GITHUB_ENV
           fi
           if [ -f "$FW_DIR/flash_image.bin" ]; then
-            SIZE=$(stat -c%s "$FW_DIR/flash_image.bin" 2>/dev/null || wc -c < "$FW_DIR/flash_image.bin")
+            SIZE=$(stat -c%s "$FW_DIR/flash_image.bin" 2>/dev/null || echo 0)
             echo "flash_image.bin: $SIZE bytes"
-            [ "$SIZE" -lt 10000 ] && echo "::warning::flash_image.bin too small — QEMU will skip" && echo "QEMU_SKIP=true" >> $GITHUB_ENV
           fi
       - name: Run firmware in QEMU (45 second window)
         if: env.QEMU_SKIP != 'true'
@@ -651,15 +609,8 @@ print(' '.join(args))
           mkdir -p ${{ env.REPORTS_DIR }}
           LOG="${{ env.REPORTS_DIR }}/qemu-run.log"
           UART_LOG="${{ env.REPORTS_DIR }}/qemu-uart-raw.log"
-
           echo "======== QEMU SESSION START ========" > "$LOG"
-          echo "Flash image: $(ls -lh $FW_DIR/flash_image.bin)" >> "$LOG"
-
-          # ── FIX QEMU NO_BOOT 2/3 : capturer UART0 dans un fichier ─────────
-          # -serial stdio pipe le UART0 dans stdout mais le tee peut rater
-          # des lignes au démarrage. Utiliser -serial file: garantit que
-          # TOUTES les lignes sont capturées même pendant le boot.
-          # -display none + -nographic évite que QEMU attende un terminal
+          echo "Flash image: $(ls -lh $FW_DIR/flash_image.bin 2>/dev/null || echo MISSING)" >> "$LOG"
           timeout 45 qemu-system-riscv32 \
             -nographic \
             -no-reboot \
@@ -667,20 +618,12 @@ print(' '.join(args))
             -drive file="$FW_DIR/flash_image.bin",if=mtd,format=raw \
             -serial file:"$UART_LOG" \
             2>>"$LOG" || true
-
-          # Intégrer le UART log dans le log principal
           echo "=== UART0 output ===" >> "$LOG"
           cat "$UART_LOG" >> "$LOG" 2>/dev/null || echo "(no uart output)" >> "$LOG"
           echo "======== QEMU SESSION END ========" >> "$LOG"
-
           LINES=$(wc -l < "$UART_LOG" 2>/dev/null || echo 0)
           echo "UART lines captured: $LINES"
-          if [ "$LINES" -gt 0 ]; then
-            echo "First boot lines:"
-            head -20 "$UART_LOG"
-          else
-            echo "::warning::No UART output captured — firmware may not have booted"
-          fi
+          head -15 "$UART_LOG" 2>/dev/null || true
       - name: Parse QEMU UART log
         if: env.QEMU_SKIP != 'true'
         run: |
@@ -1083,7 +1026,7 @@ print(' '.join(args))
           fi
           # Always produce a valid JSON report (fallback if script failed/missing)
           if [ ! -f "${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json" ]; then
-            python3 -c "import json; json.dump({'target':'esp32c3','total_scenarios':0,'passed':0,'failed':0,'overall_status':'not_run','critical_failures':[],'high_failures':[],'by_family':{},'scenarios':[],'summary':'Fault injection not run.'}, open('${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json','w'), indent=2)" 
+            python3 -c "import json; json.dump({'target':'esp32c3','total_scenarios':0,'passed':0,'failed':0,'overall_status':'not_run','critical_failures':[],'high_failures':[],'by_family':{},'scenarios':[],'summary':'Fault injection not run.'}, open('${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json','w'), indent=2)"
             echo "Fallback fault-injection report written"
           fi
           # Show summary
