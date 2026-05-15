@@ -560,53 +560,127 @@ jobs:
           FW_DIR="${{ env.FIRMWARE_DIR }}/esp32c3"
           echo "Firmware files:"
           ls -la "$FW_DIR/"
-          BOOTLOADER=$(find "$FW_DIR" -name "bootloader.bin" | head -1)
-          PARTITION=$(find "$FW_DIR" -name "partition-table.bin" | head -1)
-          APP=$(find "$FW_DIR" -maxdepth 1 -name "light.bin" | head -1)
-          if [ -z "$APP" ]; then
-            APP=$(find "$FW_DIR" -maxdepth 1 -name "*.bin"               ! -name "bootloader.bin" ! -name "partition-table.bin"               ! -name "*-signed.bin" | head -1)
-          fi
-          OTA_DATA=$(find "$FW_DIR" -name "ota_data_initial.bin" | head -1)
-          echo "Bootloader : $BOOTLOADER"
-          echo "Partition  : $PARTITION"
-          echo "App        : $APP"
-          echo "OTA data   : ${OTA_DATA:-not found}"
-          if [ -z "$BOOTLOADER" ] || [ -z "$PARTITION" ] || [ -z "$APP" ]; then
-            echo "::warning::Missing firmware binaries — QEMU will be skipped"
-            echo "QEMU_SKIP=true" >> $GITHUB_ENV
-          else
-            MERGE_DONE=false
-            if [ -n "$OTA_DATA" ]; then
-              esptool --chip esp32c3 merge-bin                 --output "$FW_DIR/flash_image.bin"                 --flash-mode dio --flash-freq 80m --flash-size 4MB                 0x0000 "$BOOTLOADER" 0x8000 "$PARTITION"                 0xd000 "$OTA_DATA" 0x10000 "$APP" 2>&1               && MERGE_DONE=true               || esptool.py --chip esp32c3 merge_bin                 --output "$FW_DIR/flash_image.bin"                 --flash_mode dio --flash_freq 80m --flash_size 4MB                 0x0000 "$BOOTLOADER" 0x8000 "$PARTITION"                 0xd000 "$OTA_DATA" 0x10000 "$APP"               && MERGE_DONE=true || true
-            fi
-            if [ "$MERGE_DONE" = "false" ]; then
-              esptool --chip esp32c3 merge-bin                 --output "$FW_DIR/flash_image.bin"                 --flash-mode dio --flash-freq 80m --flash-size 4MB                 0x0000 "$BOOTLOADER" 0x8000 "$PARTITION"                 0x10000 "$APP" 2>&1               || esptool.py --chip esp32c3 merge_bin                 --output "$FW_DIR/flash_image.bin"                 --flash_mode dio --flash_freq 80m --flash_size 4MB                 0x0000 "$BOOTLOADER" 0x8000 "$PARTITION"                 0x10000 "$APP"
-            fi
-            if [ -f "$FW_DIR/flash_image.bin" ]; then
-              echo "Flash image created: $(stat -c%s "$FW_DIR/flash_image.bin") bytes"
+
+          # ── FIX QEMU NO_BOOT 1/3 : lire flasher_args.json ─────────────────
+          # flasher_args.json contient TOUS les binaires avec leurs offsets exacts
+          # Sans ota_data_initial.bin@0xd000, ESP32-C3 Matter ne boot pas
+          FLASHER_ARGS="$FW_DIR/flasher_args.json"
+          if [ -f "$FLASHER_ARGS" ]; then
+            echo "Reading offsets from flasher_args.json..."
+            MERGE_ARGS=$(python3 -c "
+import json, sys
+from pathlib import Path
+fw_dir = Path('$FW_DIR')
+fa = json.loads((fw_dir / 'flasher_args.json').read_text())
+parts = sorted(fa.get('flash_files', {}).items(), key=lambda x: int(x[0], 16))
+args = []
+for offset, fname in parts:
+    fpath = fw_dir / fname
+    if fpath.exists():
+        args.append(f'{offset} {fpath}')
+        print(f'  + {offset}: {fname}', file=sys.stderr)
+    else:
+        print(f'  SKIP (missing): {fname}', file=sys.stderr)
+print(' '.join(args))
+" 2>&1 >/tmp/qemu_merge_args.txt; cat /tmp/qemu_merge_args.txt; python3 -c "
+import json, sys
+from pathlib import Path
+fw_dir = Path('$FW_DIR')
+fa = json.loads((fw_dir / 'flasher_args.json').read_text())
+parts = sorted(fa.get('flash_files', {}).items(), key=lambda x: int(x[0], 16))
+args = []
+for offset, fname in parts:
+    fpath = fw_dir / fname
+    if fpath.exists():
+        args.append(f'{offset} {fpath}')
+print(' '.join(args))
+")
+            if [ -n "$MERGE_ARGS" ]; then
+              esptool --chip esp32c3 merge-bin \
+                --output "$FW_DIR/flash_image.bin" \
+                --flash-mode dio \
+                --flash-freq 80m \
+                --flash-size 4MB \
+                $MERGE_ARGS
+              echo "Flash image created from flasher_args.json (all partitions)"
               echo "QEMU_SKIP=false" >> $GITHUB_ENV
             else
-              echo "::warning::flash_image.bin not created — QEMU skipped"
+              echo "::error::No valid flash files from flasher_args.json"
               echo "QEMU_SKIP=true" >> $GITHUB_ENV
             fi
+          else
+            # Fallback manuel avec ota_data_initial.bin
+            echo "::warning::No flasher_args.json — using manual offsets with ota_data"
+            BOOTLOADER=$(find "$FW_DIR" -name "bootloader.bin" | head -1)
+            PARTITION=$(find "$FW_DIR" -name "partition-table.bin" | head -1)
+            OTA_DATA=$(find "$FW_DIR" -name "ota_data_initial.bin" | head -1)
+            APP=$(find "$FW_DIR" -maxdepth 1 -name "light.bin" | head -1)
+            [ -z "$APP" ] && APP=$(find "$FW_DIR" -maxdepth 1 -name "*.bin" \
+              ! -name "bootloader.bin" ! -name "partition-table.bin" \
+              ! -name "*-signed.bin" ! -name "ota_data_initial.bin" | head -1)
+            echo "Bootloader : $BOOTLOADER"
+            echo "Partition  : $PARTITION"
+            echo "OTA data   : ${OTA_DATA:-(not found)}"
+            echo "App        : $APP"
+            if [ -z "$BOOTLOADER" ] || [ -z "$PARTITION" ] || [ -z "$APP" ]; then
+              echo "::warning::Missing firmware binaries — QEMU will be skipped"
+              echo "QEMU_SKIP=true" >> $GITHUB_ENV
+            else
+              OTA_ARGS=""
+              [ -n "$OTA_DATA" ] && OTA_ARGS="0xd000 $OTA_DATA"
+              esptool --chip esp32c3 merge-bin \
+                --output "$FW_DIR/flash_image.bin" \
+                --flash-mode dio --flash-freq 80m --flash-size 4MB \
+                0x0     "$BOOTLOADER" \
+                0x8000  "$PARTITION" \
+                $OTA_ARGS \
+                0x10000 "$APP"
+              echo "Flash image created (manual offsets)"
+              echo "QEMU_SKIP=false" >> $GITHUB_ENV
+            fi
+          fi
+          if [ -f "$FW_DIR/flash_image.bin" ]; then
+            SIZE=$(stat -c%s "$FW_DIR/flash_image.bin" 2>/dev/null || wc -c < "$FW_DIR/flash_image.bin")
+            echo "flash_image.bin: $SIZE bytes"
+            [ "$SIZE" -lt 10000 ] && echo "::warning::flash_image.bin too small — QEMU will skip" && echo "QEMU_SKIP=true" >> $GITHUB_ENV
           fi
       - name: Run firmware in QEMU (45 second window)
         if: env.QEMU_SKIP != 'true'
         run: |
           FW_DIR="${{ env.FIRMWARE_DIR }}/esp32c3"
           mkdir -p ${{ env.REPORTS_DIR }}
-          echo "======== QEMU SESSION START ========" \
-            > ${{ env.REPORTS_DIR }}/qemu-run.log
-          # FIX 5: -no-reboot + 90s timeout (Matter stack init takes ~30-60s)
-          timeout 90 qemu-system-riscv32 \
+          LOG="${{ env.REPORTS_DIR }}/qemu-run.log"
+          UART_LOG="${{ env.REPORTS_DIR }}/qemu-uart-raw.log"
+
+          echo "======== QEMU SESSION START ========" > "$LOG"
+          echo "Flash image: $(ls -lh $FW_DIR/flash_image.bin)" >> "$LOG"
+
+          # ── FIX QEMU NO_BOOT 2/3 : capturer UART0 dans un fichier ─────────
+          # -serial stdio pipe le UART0 dans stdout mais le tee peut rater
+          # des lignes au démarrage. Utiliser -serial file: garantit que
+          # TOUTES les lignes sont capturées même pendant le boot.
+          # -display none + -nographic évite que QEMU attende un terminal
+          timeout 45 qemu-system-riscv32 \
             -nographic \
             -no-reboot \
             -machine esp32c3 \
             -drive file="$FW_DIR/flash_image.bin",if=mtd,format=raw \
-            -serial stdio \
-            2>&1 | tee -a ${{ env.REPORTS_DIR }}/qemu-run.log || true
-          echo "======== QEMU SESSION END ========" \
-            >> ${{ env.REPORTS_DIR }}/qemu-run.log
+            -serial file:"$UART_LOG" \
+            2>>"$LOG" || true
+
+          # Intégrer le UART log dans le log principal
+          echo "=== UART0 output ===" >> "$LOG"
+          cat "$UART_LOG" >> "$LOG" 2>/dev/null || echo "(no uart output)" >> "$LOG"
+          echo "======== QEMU SESSION END ========" >> "$LOG"
+
+          LINES=$(wc -l < "$UART_LOG" 2>/dev/null || echo 0)
+          echo "UART lines captured: $LINES"
+          if [ "$LINES" -gt 0 ]; then
+            echo "First boot lines:"
+            head -20 "$UART_LOG"
+          else
+            echo "::warning::No UART output captured — firmware may not have booted"
+          fi
       - name: Parse QEMU UART log
         if: env.QEMU_SKIP != 'true'
         run: |
@@ -630,15 +704,7 @@ jobs:
           }
           for line in lines:
             l = line.strip()
-            # FIX 6: ESP32-C3 is RISC-V single-core — different boot messages than dual-core ESP32
-            if any(k in l for k in [
-                "cpu_start: Pro cpu", "cpu_start: App cpu",  # ESP32 dual-core (legacy)
-                "cpu_start:",          # ESP32-C3 RISC-V single-core
-                "Running on single core",  # ESP32-C3 specific
-                "app_main",            # app entry point
-                "ESP-IDF",             # IDF version banner
-                "I (",                 # any ESP-IDF info log = booted
-            ]):
+            if any(k in l for k in ["cpu_start: Pro cpu","cpu_start: App cpu","app_main"]):
               findings["boot_success"] = True
             if "app_main" in l.lower() and findings["boot_success"]:
               findings["app_started"] = True
@@ -1022,53 +1088,6 @@ jobs:
           fi
           # Show summary
           python3 -c "import json; d=json.load(open('${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json')); print('Fault injection: '+str(d.get('passed',0))+'/'+str(d.get('total_scenarios',0))+' passed | status='+str(d.get('overall_status','?')))" 2>/dev/null || true
-      # ── HIL SIMULATION — QEMU proxy test (fixed: no matrix, correct paths) ──
-      - name: HIL Simulation — QEMU proxy test
-        id: hil_sim
-        continue-on-error: true
-        run: |
-          TARGET="esp32c3"
-          REPORT="${{ env.REPORTS_DIR }}/hil-report-${TARGET}.json"
-          mkdir -p ${{ env.REPORTS_DIR }}
-          FLASH_IMG="${{ env.FIRMWARE_DIR }}/esp32c3/flash_image.bin"
-          if [ ! -f "$FLASH_IMG" ] || [ "${{ env.QEMU_SKIP }}" = "true" ] || [ "${{ env.QEMU_AVAILABLE }}" = "false" ]; then
-            echo "HIL skipped — flash image not available or QEMU not installed"
-            echo '{"status":"skipped","reason":"flash image not available or QEMU not installed","device":"esp32c3-qemu-proxy","tests_run":0,"tests_passed":0,"tests_failed":0,"duration_s":0,"failures":[]}' > "$REPORT"
-          else
-            echo "=== HIL Simulation via QEMU for esp32c3 ==="
-            START=$(date +%s)
-            PASS=0; FAIL=0
-            declare -a FAILURES=()
-            BOOT_LOG=$(timeout 60 qemu-system-riscv32               -nographic -no-reboot               -machine esp32c3               -drive file="$FLASH_IMG",if=mtd,format=raw               -serial stdio 2>&1 || true)
-            # Test 1: boot sequence
-            if echo "$BOOT_LOG" | grep -qE "app_main|cpu_start:|ESP-IDF|I \("; then
-              PASS=$((PASS+1)); echo "  [HIL-1] boot_sequence: PASS"
-            else
-              FAIL=$((FAIL+1)); FAILURES+=("boot_sequence"); echo "  [HIL-1] boot_sequence: FAIL"
-            fi
-            # Test 2: no panic
-            if echo "$BOOT_LOG" | grep -qE "Guru Meditation|abort\(\)|Backtrace:"; then
-              FAIL=$((FAIL+1)); FAILURES+=("no_panic_at_boot"); echo "  [HIL-2] no_panic_at_boot: FAIL"
-            else
-              PASS=$((PASS+1)); echo "  [HIL-2] no_panic_at_boot: PASS"
-            fi
-            # Test 3: Matter stack or app started
-            if echo "$BOOT_LOG" | grep -qE "CHIPoBLE|esp_matter|app_main|I \("; then
-              PASS=$((PASS+1)); echo "  [HIL-3] matter_stack_init: PASS"
-            else
-              FAIL=$((FAIL+1)); FAILURES+=("matter_stack_init"); echo "  [HIL-3] matter_stack_init: FAIL"
-            fi
-            END=$(date +%s)
-            TOTAL=$((PASS+FAIL)); STATUS="pass"; [ $FAIL -gt 0 ] && STATUS="fail"
-            PASS_RATE=0; [ $TOTAL -gt 0 ] && PASS_RATE=$(echo "scale=1; $PASS*100/$TOTAL" | bc 2>/dev/null || echo 0)
-            FAIL_JSON="["; SEP=""
-            for f in "${FAILURES[@]}"; do FAIL_JSON+="${SEP}"${f}""; SEP=","; done
-            FAIL_JSON+="]"
-            printf '{"status":"%s","device":"esp32c3-qemu-proxy","tests_run":%s,"tests_passed":%s,"tests_failed":%s,"pass_rate":%s,"duration_s":%s,"test_scenarios":["boot_sequence","no_panic_at_boot","matter_stack_init"],"failures":%s}\n'               "$STATUS" "$TOTAL" "$PASS" "$FAIL" "$PASS_RATE" "$((END-START))" "$FAIL_JSON"               > "$REPORT"
-            echo "HIL: $STATUS ($PASS/$TOTAL)"
-          fi
-          cat "$REPORT"
-
       - name: Upload test & quality reports
         uses: actions/upload-artifact@v4
         if: always()
@@ -1091,7 +1110,6 @@ jobs:
             ${{ env.REPORTS_DIR }}/fuzz-build.log
             ${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json
             ${{ env.REPORTS_DIR }}/fault-injection-run.log
-            ${{ env.REPORTS_DIR }}/hil-report-esp32c3.json
           retention-days: 30
 
 # ════════════════════════════════════════════════════════════════════
@@ -1647,7 +1665,6 @@ jobs:
             ${{ env.REPORTS_DIR }}/unit-test-results-qemu.json
             ${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json
             ${{ env.REPORTS_DIR }}/fuzz-report-esp32c3.json
-            ${{ env.REPORTS_DIR }}/hil-report-esp32c3.json
             ${{ env.REPORTS_DIR }}/test-deploy-manifest.json
             ${{ env.REPORTS_DIR }}/patches/
           retention-days: 90
