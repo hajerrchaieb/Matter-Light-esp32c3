@@ -581,26 +581,30 @@ jobs:
           else
             OTA_ARGS=""
             if [ -n "$OTA_DATA" ]; then
-              OTA_ARGS="0xd000 $OTA_DATA"
-              echo "Including ota_data_initial.bin at 0xd000"
+              OTA_ARGS="0x1d000 $OTA_DATA"
+              echo "Including ota_data_initial.bin at 0x1d000"
             else
               echo "::warning::ota_data_initial.bin not found"
             fi
             esptool --chip esp32c3 merge-bin \
               --output "$FW_DIR/flash_image.bin" \
+              --pad-to-length 0x400000 \
               --flash-mode dio \
               --flash-freq 80m \
               --flash-size 4MB \
               0x0     "$BOOTLOADER" \
-              0x8000  "$PARTITION" \
+              0xc000  "$PARTITION" \
               $OTA_ARGS \
-              0x10000 "$APP"
+              0x20000 "$APP"
             echo "Flash image created"
-            echo "QEMU_SKIP=false" >> $GITHUB_ENV
-          fi
-          if [ -f "$FW_DIR/flash_image.bin" ]; then
             SIZE=$(stat -c%s "$FW_DIR/flash_image.bin" 2>/dev/null || echo 0)
-            echo "flash_image.bin: $SIZE bytes"
+            echo "flash_image.bin size: $SIZE bytes (should be exactly 4194304)"
+            if [ "$SIZE" -ne "4194304" ]; then
+              echo "::warning::flash_image.bin is not 4MB — QEMU may reject it"
+            else
+              echo "Size OK: exactly 4MB — QEMU will accept it"
+            fi
+            echo "QEMU_SKIP=false" >> $GITHUB_ENV
           fi
       - name: Run firmware in QEMU (45 second window)
         if: env.QEMU_SKIP != 'true'
@@ -794,12 +798,13 @@ jobs:
           "
             exit 0
           fi
-          esptool.py --chip esp32c3 merge_bin \
+          esptool --chip esp32c3 merge-bin \
               --output "$FW_DIR/test_flash.bin" \
-              --flash_mode dio --flash_freq 80m --flash_size 4MB \
+              --pad-to-length 0x400000 \
+              --flash-mode dio --flash-freq 80m --flash-size 4MB \
               0x0     "$BOOTLOADER" \
-              0x8000  "$PARTITION" \
-              0x10000 "$APP" \
+              0xc000  "$PARTITION" \
+              0x20000 "$APP" \
               2>&1 | tail -5
           echo "=== Booting test firmware in QEMU (90 s window) ==="
           LOG=${{ env.REPORTS_DIR }}/qemu-test-run.log
