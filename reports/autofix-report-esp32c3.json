@@ -1,0 +1,54 @@
+{
+  "agent": "autofix_agent",
+  "target": "esp32c3",
+  "generated_at": "2026-05-17T09:40:39.780214Z",
+  "llm_used": true,
+  "issues_analyzed": 5,
+  "patches_generated": 2,
+  "patch_files": [
+    "autofix-esp32c3-01-security-tools_qemu_fault_runner.py.patch",
+    "autofix-esp32c3-05-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch"
+  ],
+  "patches_detail": [
+    {
+      "patch_name": "autofix-esp32c3-01-security-tools_qemu_fault_runner.py.patch",
+      "file": "tools/qemu_fault_runner.py",
+      "source_agent": "security",
+      "severity": "critical",
+      "description": "Hardcoded generic-api-key detected in qemu_fault_runner.py line 117. Action: Remove from code, rotate the secret, use env var via os.environ.get('VAR', '')",
+      "fix_method": "llm",
+      "valid": false
+    },
+    {
+      "patch_name": "autofix-esp32c3-05-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch",
+      "file": "esp-matter/examples/light/main/app_main.cpp",
+      "source_agent": "fault_analysis",
+      "severity": "medium",
+      "description": "insufficient stack size or incorrect stack usage",
+      "fix_method": "llm",
+      "valid": false
+    }
+  ],
+  "manual_instructions": [
+    {
+      "source_agent": "code_review",
+      "severity": "high",
+      "description": "1. **Unsafe functions**: The code uses `strcpy` and `strcat` functions, which can lead to buffer overflows. Consider using safer alternatives like `strlcpy` and `strlcat`.",
+      "how_to_fix": ""
+    },
+    {
+      "source_agent": "code_review",
+      "severity": "high",
+      "description": "**Buffer risks**: The code uses fixed-size buffers, such as `cdSpan` and `s_decryption_key`. Ensure that these buffers are large enough to hold the expected data and consider using dynamic memory allocation if necessary.",
+      "how_to_fix": ""
+    },
+    {
+      "source_agent": "code_review",
+      "severity": "high",
+      "description": "**Memory leaks**: The code does not appear to have any obvious memory leaks, but it is essential to ensure that all dynamically allocated memory is properly freed.",
+      "how_to_fix": ""
+    }
+  ],
+  "status": "patches_generated",
+  "summary": "2 patch(es) g\u00e9n\u00e9r\u00e9s | 3 manuels."
+}
