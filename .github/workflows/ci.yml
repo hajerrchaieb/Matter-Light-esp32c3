@@ -588,7 +588,7 @@ jobs:
             fi
             esptool --chip esp32c3 merge-bin \
               --output "$FW_DIR/flash_image.bin" \
-              --pad-to-length 0x400000 \
+              --pad-to-size 0x400000 \
               --flash-mode dio \
               --flash-freq 80m \
               --flash-size 4MB \
@@ -800,7 +800,7 @@ jobs:
           fi
           esptool --chip esp32c3 merge-bin \
               --output "$FW_DIR/test_flash.bin" \
-              --pad-to-length 0x400000 \
+              --pad-to-size 0x400000 \
               --flash-mode dio --flash-freq 80m --flash-size 4MB \
               0x0     "$BOOTLOADER" \
               0xc000  "$PARTITION" \
