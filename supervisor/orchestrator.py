@@ -1,21 +1,25 @@
 """
-supervisor/orchestrator.py — DevSecOps Pipeline Orchestrator (v7 — HIL branché + OTA fix)
-==========================================================================================
+supervisor/orchestrator.py — DevSecOps Pipeline Orchestrator (v6 — PFE final)
+==============================================================================
 
-CHANGEMENTS v7 vs v6 :
-  1. HIL BRANCHÉ :
-       - Extraction complète des métriques HIL depuis hil-report-{target}.json
-       - hil_status, hil_tests, hil_passed_n, hil_failed_n, hil_device,
-         hil_duration, hil_failures extraits proprement
-       - Section "hil" complète dans pipeline-summary.json
-       - HIL affiché dans le banner console et le PR comment
-       - Log détaillé HIL dans node_fault_analysis
+CORRECTIONS vs v5:
+  1. node_summary() écrit un pipeline-summary.json RICHE :
+       - block_reason  : pourquoi le pipeline est bloqué (texte lisible)
+       - quality_score : normalisé même si l'agent renvoie du markdown
+       - secrets_source: distingue vrais secrets (code source) vs faux
+                         positifs (secrets dans les fichiers .patch)
+       - autofix.patches_detail : liste complète des patches avec fix_method
+       - tests.test_cases        : liste des cas générés
+       - agents_run              : combien d'agents ont tourné sur 8
 
-  2. OTA FIX :
-       - La section "release" dans pipeline-summary.json intègre maintenant
-         les données de ota-manifest-signed.json (version, checksums, commit)
-       - canary_deploy reflète le vrai statut depuis deploy-status.txt
-       - Nouveau champ ota_manifest_present pour le dashboard
+  2. Tous les champs du dashboard v5 sont désormais présents :
+       stage_results.code_quality.quality_score   (entier 0-10)
+       stage_results.security.secrets_in_source   (vrais secrets)
+       stage_results.security.secrets_in_patches  (faux positifs)
+       stage_results.autofix.fix_method           (deterministic/llm)
+       stage_results.tests.test_cases             (liste des cas)
+
+  3. Pas de changement à la logique des agents ni du graph LangGraph.
 """
 
 import json
@@ -171,7 +175,6 @@ def load_ci_artifacts(state: PipelineState) -> PipelineState:
     state["deploy_status"]          = _load_deploy_status()
     state["feedback_issues"]        = []
     state["fault_injection_result"] = _load_json(REPORTS / f"fault-injection-report-{t}.json")
-    # ← HIL BRANCHÉ : chargement du rapport HIL
     state["hil_result"]             = _load_json(REPORTS / f"hil-report-{t}.json")
     state["patches_generated"]      = 0
     state["tests_deployed"]         = False
@@ -283,7 +286,6 @@ def node_fault_analysis(state: PipelineState) -> PipelineState:
         qemu_pass   = qemu_r.get("status") == "pass"
         fuzzer_pass = fuzz_r.get("total_issues", 1) == 0
         fi_pass     = fi.get("overall_status") == "pass" if fi else False
-        # ← HIL BRANCHÉ : lire le statut HIL pour le dynamic score
         hil_pass    = state.get("hil_result", {}).get("status") == "pass"
 
         try:
@@ -298,15 +300,8 @@ def node_fault_analysis(state: PipelineState) -> PipelineState:
             ds = 0
 
         state["dynamic_score"] = min(ds, 10)
-
-        # ← HIL BRANCHÉ : log détaillé HIL
-        hil_r        = state.get("hil_result", {})
-        hil_status   = hil_r.get("status", "not_run")
-        hil_tests    = hil_r.get("tests_run", 0)
-        hil_passed_n = hil_r.get("tests_passed", 0)
         print(f"[Orchestrator] Dynamic={state['dynamic_score']}/10 "
-              f"(QEMU={qemu_pass} Fuzz={fuzzer_pass} FI={fi_pass} HIL={hil_pass})")
-        print(f"[Orchestrator] HIL: {hil_passed_n}/{hil_tests} tests — status={hil_status}")
+              f"(QEMU={qemu_pass} Fuzz={fuzzer_pass} FI={fi_pass})")
     except Exception as e:
         print(f"[Orchestrator] Fault Analysis failed: {e}")
         state["fault_analysis_result"] = {"error": str(e)}
@@ -318,7 +313,7 @@ def node_test_gen(state: PipelineState) -> PipelineState:
     print("\n" + "=" * 60 + "\nNODE: Test Generation Agent")
     state["current_stage"] = "test_gen"
     try:
-        result = _call_agent_with_retry(run_test_gen_agent, target=state["target"])
+        result = _call_agent_with_retry(run_test_gen_agent,target=state["target"])
         state["testgen_result"] = result
         n      = len(result.get("test_cases", []))
         deploy = result.get("deploy_manifest", {})
@@ -371,7 +366,8 @@ def node_autofix(state: PipelineState) -> PipelineState:
 
 
 # ════════════════════════════════════════════════════════════════════
-# NODE SUMMARY — v7 : HIL branché + OTA fix
+# NODE SUMMARY — CORRIGÉ v6
+# Écrit un pipeline-summary.json complet pour le dashboard
 # ════════════════════════════════════════════════════════════════════
 
 def _classify_secrets(secrets: list) -> tuple[list, list]:
@@ -396,7 +392,6 @@ def _classify_secrets(secrets: list) -> tuple[list, list]:
 def node_summary(state: PipelineState) -> PipelineState:
     """
     Stage 8: Agrège tout en pipeline-summary.json riche + PR comment.
-    v7: HIL branché + OTA manifest intégré
     """
     print("\n" + "=" * 60 + "\nNODE: Pipeline Summary")
     state["current_stage"] = "summary"
@@ -411,7 +406,12 @@ def node_summary(state: PipelineState) -> PipelineState:
     _af  = state.get("autofix_result",        {})
     _tg  = state.get("testgen_result",        {})
     _fi  = state.get("fault_injection_result", {})
-    _ut  = state.get("unit_test_result",      {})
+    # FIX TESTS: re-lire unit-test-results.json maintenant (pas depuis state)
+    # state["unit_test_result"] est chargé au démarrage AVANT que Stage 5
+    # ait fini d'écrire le fichier. En Run 2, les tests ont tourné pendant
+    # Stage 5 donc on relit le fichier ici pour avoir les vrais résultats.
+    _ut_fresh = _load_json(REPORTS / "unit-test-results.json")
+    _ut = _ut_fresh if _ut_fresh else state.get("unit_test_result", {})
 
     # ── Scores ────────────────────────────────────────────────────
     code_score = _cr.get("quality_score", "N/A")
@@ -432,6 +432,7 @@ def node_summary(state: PipelineState) -> PipelineState:
     real_secrets, fp_secrets = _classify_secrets(all_secrets)
     n_real_secrets = len(real_secrets)
     n_fp_secrets   = len(fp_secrets)
+    # Utiliser uniquement les vrais secrets pour évaluer le risque
     n_secrets = n_real_secrets
 
     n_patches  = state.get("patches_generated", 0)
@@ -447,38 +448,56 @@ def node_summary(state: PipelineState) -> PipelineState:
     ut_passed  = _ut.get("passed",  0)
     ut_failed  = _ut.get("failed",  0)
     ut_total   = _ut.get("total",   0)
+    # pending_run2 seulement si tests générés mais pas encore exécutés (Run 1)
+    # En Run 2, ut_total > 0 donc on garde le vrai statut (pass/fail/partial)
     if n_tests > 0 and ut_total == 0 and ut_status in ("no_tests_yet", "partial", "no_output"):
         ut_status = "pending_run2"
         print(f"[Orchestrator] {n_tests} test(s) generated — will execute in Run 2")
+    elif ut_total > 0:
+        # Run 2 : tests ont tourné — afficher le vrai résultat
+        print(f"[Orchestrator] Tests executed: {ut_passed}/{ut_total} passed — status={ut_status}")
 
     # ── Fault injection ───────────────────────────────────────────
     fi_total   = _fi.get("total_scenarios", 0)
     fi_passed  = _fi.get("passed",          0)
     fi_status  = _fi.get("overall_status",  "not_run")
 
-    # ── HIL BRANCHÉ : extraction complète des métriques HIL ───────
-    _hil         = state.get("hil_result", {})
-    hil_status   = _hil.get("status",        "not_run")   # "pass"|"fail"|"skipped"|"not_run"
-    hil_tests    = _hil.get("tests_run",     0)
-    hil_passed_n = _hil.get("tests_passed",  0)
-    hil_failed_n = _hil.get("tests_failed",  0)
-    hil_device   = _hil.get("device",        f"{target}-qemu-proxy")
-    hil_duration = _hil.get("duration_s",    None)
-    hil_failures = _hil.get("failures",      []) or []
-    hil_pass     = hil_status == "pass"
-    hil_pass_rate = round(hil_passed_n / hil_tests * 100, 1) if hil_tests > 0 else 0
+    # ── OTA FIX: charger manifest + checksums depuis les vrais fichiers ──
+    # ota-manifest-signed.json est écrit par ci.yml Stage AI (toujours)
+    # firmware-sha256.txt est écrit par Stage 6 (toujours)
+    _ota = state.get("ota_manifest", {})
+    # Re-lire depuis disque au cas où ci.yml l'a écrit après load_ci_artifacts
+    _ota_fresh = _load_json(REPORTS / "ota-manifest-signed.json")
+    if _ota_fresh:
+        _ota = _ota_fresh
 
-    # ── OTA FIX : intégrer ota_manifest dans les données release ──
-    _ota         = state.get("ota_manifest", {})
-    ota_version  = _ota.get("version",  version)
-    ota_commit   = _ota.get("commit",   "—")
+    # Lire les SHA-256 depuis firmware-sha256.txt si checksums vides
     ota_checksums = _ota.get("checksums", {})
-    ota_present  = bool(_ota)
-    deploy_status_val = state.get("deploy_status", "simulated")
+    if not ota_checksums:
+        try:
+            sha_txt = (REPORTS / "firmware-sha256.txt").read_text()
+            for line in sha_txt.strip().splitlines():
+                parts = line.strip().split()
+                if len(parts) == 2:
+                    ota_checksums[parts[1]] = parts[0]
+        except Exception:
+            pass
+
+    ota_version      = _ota.get("version", version)
+    ota_commit       = _ota.get("commit", "—")
+    ota_present      = bool(ota_checksums)
+    ota_rollout      = _ota.get("rollout_pct", 10)
+    ota_note         = _ota.get("note", None)
+    _raw_deploy      = state.get("deploy_status", "") or "simulated"
+    deploy_status_val = _raw_deploy if _raw_deploy in (
+        "success", "fail", "rollback", "simulated"
+    ) else "simulated"
+    print(f"[Orchestrator] OTA: version={ota_version} checksums={len(ota_checksums)} deploy={deploy_status_val}")
 
     # ── AutoFix details ───────────────────────────────────────────
     patches_detail  = _af.get("patches_detail", []) or []
     manual_instr    = _af.get("manual_instructions", []) or []
+    # Enrichir fix_method si absent (déterministe = rule_based)
     for p in patches_detail:
         if not p.get("fix_method"):
             p["fix_method"] = "rule_based"
@@ -507,12 +526,13 @@ def node_summary(state: PipelineState) -> PipelineState:
     passed = state["pipeline_passed"]
 
     # ── Security score override ──────────────────────────────────
+    # If 0 real secrets AND 0 critical CVEs, LLM score of 0 is aberrant
     if isinstance(sec_score, int) and sec_score < 6 and n_real_secrets == 0 and n_cves == 0:
         corrected = max(sec_score, 7)
         print(f"[Orchestrator] Security score corrected: {sec_score}/10 -> {corrected}/10 (no real threats)")
         sec_score = corrected
 
-    # ── Block reason ─────────────────────────────────────────────
+    # ── Block reason (texte lisible pour le dashboard) ────────────
     block_reasons = []
     if n_real_secrets > 0:
         block_reasons.append(
@@ -533,6 +553,7 @@ def node_summary(state: PipelineState) -> PipelineState:
         )
     block_reason = " | ".join(block_reasons) if block_reasons else None
 
+    # ── Fix: pipeline_passed must be False when block_reason exists ─
     if block_reason:
         state["pipeline_passed"] = False
         print(f"[Orchestrator] Pipeline BLOCKED: {block_reason[:80]}")
@@ -548,9 +569,6 @@ def node_summary(state: PipelineState) -> PipelineState:
         f"║ Fault Inject: {fi_passed}/{fi_total}  {fi_status}",
         f"║ Memory      : Flash {flash_pct}%",
         f"║ Robustness  : {rob_score}/10  Dynamic={dyn_score}/10",
-        # ← HIL BRANCHÉ : ligne HIL dans le banner
-        f"║ HIL Tests   : {hil_passed_n}/{hil_tests}  status={hil_status}  device={hil_device}",
-        f"║ OTA Deploy  : {deploy_status_val}  version={ota_version}  manifest={'yes' if ota_present else 'no'}",
         f"║ AutoFix     : {n_patches} patch(es)  agents={agents_run}/8",
         f"║ Overall     : {'PASSED ✅' if passed else 'ISSUES ⚠️'}",
         f"║ Block reason: {block_reason or 'none'}",
@@ -564,17 +582,14 @@ def node_summary(state: PipelineState) -> PipelineState:
         f"**Overall:** {'✅ PASSED' if passed else '⚠️ ISSUES DETECTED'}", "",
         "### 📊 Agent Scores", "",
         "| Agent | Result | Details |",
-        "|-------|--------|---------|\n",
+        "|-------|--------|---------|",
         f"| 🔍 Code Review | `{code_score}/10` | Static analysis of ESP-Matter C++ source |",
         f"| 🔐 Security    | `{sec_score}/10` | "
         f"{n_real_secrets} real secret(s) · {n_cves} critical CVE(s) |",
         f"| 🔨 Build       | `{build_ok}` | ESP-IDF `idf.py build` esp32c3 |",
         f"| 💾 Memory      | Flash `{flash_pct}%` | ESP32-C3 4MB flash |",
         f"| 🛡️ Robustness  | `{rob_score}/10` | "
-        f"Dynamic composite: `{dyn_score}/10` |",
-        # ← HIL BRANCHÉ : ligne HIL dans le PR comment
-        f"| 🔌 HIL Tests   | `{hil_status}` | "
-        f"{hil_passed_n}/{hil_tests} tests · device: `{hil_device}` |", "",
+        f"Dynamic composite: `{dyn_score}/10` |", "",
         "### 🔧 AutoFix Patches", "",
     ]
     if patches_detail:
@@ -613,21 +628,6 @@ def node_summary(state: PipelineState) -> PipelineState:
             f"**❌ Critical failures:** "
             f"`{'`, `'.join(_fi['critical_failures'][:5])}`",
         ]
-    pr_lines += [""]
-
-    # ← HIL BRANCHÉ : section HIL dans le PR comment
-    pr_lines += [
-        "### 🔌 HIL Tests (Hardware-in-the-Loop)", "",
-        "| Metric | Value |", "|--------|-------|",
-        f"| Status   | `{hil_status}` |",
-        f"| Tests    | {hil_passed_n}/{hil_tests} passed |",
-        f"| Pass rate | {hil_pass_rate}% |",
-        f"| Device   | `{hil_device}` |",
-    ]
-    if hil_duration:
-        pr_lines.append(f"| Duration | {hil_duration}s |")
-    if hil_failures:
-        pr_lines += ["", f"**Failed tests:** `{'`, `'.join(str(f) for f in hil_failures[:5])}`"]
     pr_lines += [""]
 
     if n_real_secrets > 0:
@@ -675,21 +675,21 @@ def node_summary(state: PipelineState) -> PipelineState:
         "pipeline_passed":  passed,
         "errors_found":     errors,
         "second_run_ready": second_run_ready,
-        "block_reason":     block_reason,
-        "agents_run":       agents_run,
+        "block_reason":     block_reason,          # ← NOUVEAU
+        "agents_run":       agents_run,            # ← NOUVEAU
         "stage_results": {
             "code_quality": {
                 "score":         code_score,
-                "quality_score": code_score,
+                "quality_score": code_score,       # ← alias pour le dashboard
                 "issues":        len(_cr.get("issues", []) or []),
             },
             "security": {
                 "score":               sec_score,
                 "cves":                n_cves,
-                "secrets":             n_secrets,
-                "secrets_found":       n_real_secrets,
-                "secrets_in_patches":  n_fp_secrets,
-                "real_secrets":        real_secrets[:10],
+                "secrets":             n_secrets,            # vrais seulement
+                "secrets_found":       n_real_secrets,       # ← NOUVEAU
+                "secrets_in_patches":  n_fp_secrets,         # ← NOUVEAU (FP)
+                "real_secrets":        real_secrets[:10],    # ← NOUVEAU détails
                 "intentional_bug_demo": any(
                     "intentional_bug" in s.get("file", "")
                     for s in real_secrets
@@ -704,7 +704,7 @@ def node_summary(state: PipelineState) -> PipelineState:
                 "passed":     ut_passed,
                 "failed":     ut_failed,
                 "status":     ut_status,
-                "test_cases": [
+                "test_cases": [          # ← NOUVEAU liste des cas
                     {"name": tc.get("name", "?"),
                      "type": tc.get("type", "?"),
                      "area": tc.get("area", "?")}
@@ -718,40 +718,28 @@ def node_summary(state: PipelineState) -> PipelineState:
                 "robustness_score": rob_score,
                 "dynamic_score":    dyn_score,
             },
-            # ← HIL BRANCHÉ : section HIL complète dans le JSON
-            "hil": {
-                "status":                    hil_status,
-                "tests_run":                 hil_tests,
-                "tests_passed":              hil_passed_n,
-                "tests_failed":              hil_failed_n,
-                "pass_rate":                 hil_pass_rate,
-                "device":                    hil_device,
-                "duration_s":                hil_duration,
-                "failures":                  hil_failures[:5],
-                "contributes_to_dynamic_score": True,
-                "weight_in_dynamic":         "5%",
-            },
             "autofix": {
                 "patches_generated": n_patches,
                 "patch_files":       _af.get("patch_files", []),
                 "issues_analyzed":   _af.get("issues_analyzed", 0),
                 "status":            _af.get("status", "unknown"),
-                "patches_detail":    patches_detail,
-                "manual_count":      len(manual_instr),
-                "fix_method":        (
+                "patches_detail":    patches_detail,    # ← NOUVEAU complet
+                "manual_count":      len(manual_instr), # ← NOUVEAU
+                "fix_method":        (                  # ← NOUVEAU
                     patches_detail[0].get("fix_method", "unknown")
                     if patches_detail else "none"
                 ),
             },
-            # ← OTA FIX : section release enrichie avec ota_manifest
+            # OTA FIX: section release complète avec checksums et manifest
             "release": {
                 "version":              ota_version,
                 "canary_deploy":        deploy_status_val,
                 "ota_manifest_present": ota_present,
                 "ota_commit":           ota_commit,
                 "ota_checksums":        ota_checksums,
-                "rollout_pct":          10,
+                "rollout_pct":          ota_rollout,
                 "protocol":             "ESP-Matter OTA",
+                "ota_note":             ota_note,
             },
         },
     }, indent=2), encoding="utf-8")
