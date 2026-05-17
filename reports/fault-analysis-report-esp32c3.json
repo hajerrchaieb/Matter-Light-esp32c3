@@ -1,0 +1,73 @@
+{
+  "target": "esp32c3",
+  "robustness_score": 7,
+  "score_justification": "The esp32c3 scored 9/10 in the fault injection tests, with one critical failure in the stack_overflow_trigger scenario. The device handled most high-severity scenarios, but the critical failure in the stack overflow scenario brings the overall score down to 7. The device's ability to handle most high-severity scenarios and reboot in some cases indicates a moderate level of robustness.",
+  "failed_scenarios_analysis": [
+    {
+      "scenario": "stack_overflow_trigger",
+      "family": "memory",
+      "cwe": "CWE-121",
+      "root_cause": "insufficient stack size or infinite recursion",
+      "fix_code": "increase stack size or implement recursion limits",
+      "effort": "medium"
+    }
+  ],
+  "passed_scenarios_highlights": [
+    {
+      "scenario": "nvs_magic_corruption",
+      "why_good": "correctly calls nvs_flash_erase()"
+    },
+    {
+      "scenario": "malloc_exhaustion",
+      "why_good": "correctly handles memory allocation failures"
+    }
+  ],
+  "family_assessments": {
+    "memory": {
+      "score": 6,
+      "verdict": "NEEDS_IMPROVEMENT",
+      "top_recommendation": "increase stack size and implement recursion limits"
+    },
+    "nvs": {
+      "score": 8,
+      "verdict": "GOOD",
+      "top_recommendation": "continue to use nvs_flash_erase() to handle corruption"
+    },
+    "matter": {
+      "score": 7,
+      "verdict": "ACCEPTABLE",
+      "top_recommendation": "separate Matter protocol handling into distinct modules"
+    }
+  },
+  "priority_fixes": [
+    "1. [CRITICAL] Fix stack overflow trigger by increasing stack size or implementing recursion limits",
+    "2. [HIGH] Improve code structure and naming conventions to enhance readability and maintainability",
+    "3. [MEDIUM] Separate Matter protocol handling into distinct modules to improve code organization"
+  ],
+  "overall_verdict": "NEEDS_IMPROVEMENT",
+  "summary": "The esp32c3 demonstrated moderate robustness in fault injection tests, with one critical failure in the stack overflow scenario. To improve robustness, priority fixes include addressing the stack overflow issue, improving code structure and naming conventions, and separating Matter protocol handling into distinct modules. With these fixes, the device can achieve a higher level of robustness and reliability.",
+  "fault_runner_summary": {
+    "total": 10,
+    "passed": 9,
+    "failed": 1,
+    "status": "critical_fail",
+    "by_family": {
+      "memory": {
+        "total": 4,
+        "passed": 3,
+        "failed": 1
+      },
+      "nvs": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      },
+      "matter": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      }
+    }
+  },
+  "analysis_timestamp": "2026-05-17T14:26:27.097749"
+}
