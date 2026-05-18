@@ -1,0 +1,18 @@
+{
+  "last_updated": "2026-05-18T06:42:13.522843",
+  "run_count": 1,
+  "runs": [
+    {
+      "run_time": "2026-05-18T06:42:13.522627",
+      "target": "esp32c3",
+      "version": "v101",
+      "passed": true,
+      "code_quality": 4.0,
+      "security": 0.0,
+      "robustness": 7.0,
+      "dynamic": null,
+      "flash_pct": 43.9,
+      "tests_count": null
+    }
+  ]
+}
