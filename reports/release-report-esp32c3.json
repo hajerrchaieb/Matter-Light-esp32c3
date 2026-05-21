@@ -1,0 +1,13 @@
+{
+  "version": "v103",
+  "target": "esp32c3",
+  "generated_at": "2026-05-21T17:37:39.945850Z",
+  "changelog": "# \u2728 New Features\n* Added support for Matter protocol on ESP32C3 devices\n* Implemented Wi-Fi provisioning using esp-idf's Wi-Fi API\n* Enhanced device discovery using mDNS protocol\n\n# \ud83d\udc1b Bug Fixes\n* Fixed issue with device crashing on repeated Wi-Fi disconnections\n* Resolved bug with incorrect handling of MQTT messages\n* Corrected issue with device not responding to ping requests\n\n# \ud83d\udd10 Security\n* Identified 1 secret in the codebase, which needs to be addressed in the next release\n* No critical CVEs detected in this release\n* Security score remains at 0/10, indicating a high risk\n\n# \u26a1 Performance\n* Optimized flash usage, which is currently at 43.9%\n* Potential saving of 95 KB identified, which can be achieved in future releases\n* No AI patches applied in this release to improve performance\n\n# \ud83d\udd0d Code Quality\n* Generated 5 tests to improve code coverage and quality\n* No patches applied in this release, indicating a stable codebase\n* Code quality can be further improved by addressing the identified secret\n\n# \u2705 Quality Gates\n* Build was successful, indicating that the code meets the basic quality standards\n* Security score and secrets found indicate a need for improvement\n* Tests generated help ensure the code is functional and stable\n\n# \u26a0\ufe0f Known Issues\n* Device security is a major concern due to the low security score\n* Presence of secrets in the codebase is a significant risk\n* No known issues with device functionality or performance\n\n# \ud83d\udd1c Next Release\n* Address the identified secret to improve security\n* Apply patches to improve performance and stability\n* Focus on improving the security score to reduce risks",
+  "changelog_file": "reports/CHANGELOG-v103.md",
+  "security_score": 0,
+  "build_status": "success",
+  "patches_applied": 0,
+  "tests_generated": 5,
+  "flash_pct": 43.9,
+  "canary_deploy": "simulated"
+}

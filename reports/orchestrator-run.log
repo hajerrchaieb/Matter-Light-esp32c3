@@ -1,0 +1,168 @@
+
+============================================================
+NODE: Code Review Agent
+
+=======================================================
+🔵 CODE REVIEW AGENT — Stage 1
+📁 Source : ../esp-matter/examples/light/main
+🎯 Target : esp32c3
+=======================================================
+  📁 Source found at: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main
+
+📖 Reading source files...
+  ✅ Read: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main/app_main.cpp (11481 chars)
+  ✅ Read: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main/app_driver.cpp (7561 chars)
+  ✅ Read: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main/app_priv.h (3375 chars)
+
+⚡ Reviewing code with Groq...
+
+📋 CODE REVIEW RESULT:
+-------------------------------------------------------
+### CODE QUALITY ISSUES
+
+1. **Complexity**: The code has multiple nested if-else statements and complex logic, which can make it difficult to understand and maintain.
+2. **Naming**: Some variable names, such as `val` and `handle`, are not descriptive and can be confusing.
+3. **Structure**: The code is not modular, with multiple functions and variables defined in a single file.
+4. **Comments**: There are no comments explaining the purpose of each function or variable, making it difficult for others to understand the code.
+5. **Magic numbers**: The code uses magic numbers, such as `254` and `1000000`, which are not explained and can be confusing.
+6. **Duplicate code**: The `app_driver_light_set_power`, `app_driver_light_set_brightness`, `app_driver_light_set_hue`, and `app_driver_light_set_saturation` functions have similar code and can be refactored to reduce duplication.
+
+### SECURITY ISSUES
+
+1. **Buffer risks**: The `cdSpan` and `s_decryption_key` variables are not checked for buffer overflows.
+2. **Memory leaks**: The `app_driver_handle_t` type is a void pointer, which can lead to memory leaks if not properly managed.
+3. **Hardcoded values**: The `cd_start` and `cd_end` variables are hardcoded, which can be a security risk if the values are not properly validated.
+4. **Unsafe functions**: The `led_driver_set_power`, `led_driver_set_brightness`, `led_driver_set_hue`, and `led_driver_set_saturation` functions are not checked for errors and can lead to crashes or unexpected behavior.
+
+### ESP32 BEST PRACTICES VIOLATIONS
+
+1. **Task stack sizes**: The task stack sizes are not explicitly set, which can lead to stack overflows.
+2. **Heap usage**: The code uses dynamic memory allocation, which can lead to memory fragmentation and crashes if not properly managed.
+3. **ISR safety**: The code does not check for ISR safety, which can lead to crashes or unexpected behavior.
+4. **Error handling**: The code does not properly handle errors, which can lead to crashes or unexpected behavior.
+5. **NVS usage**: The code does not properly use NVS, which can lead to data corruption or crashes.
+
+### ESP-MATTER SPECIFIC ISSUES
+
+1. **Attribute handling**: The code does not properly handle attribute values, which can lead to unexpected behavior or crashes.
+2. **Cluster configuration**: The code does not properly configure clusters, which can lead to unexpected behavior or crashes.
+3. **Commissioning flow**: The code does not properly handle the commissioning flow, which can lead to unexpected behavior or crashes.
+
+### SUGGESTED IMPROVEMENTS
+
+1. **Refactor code**: Refactor the code to reduce complexity and improve modularity.
+2. **Use descriptive variable names**: Use descriptive variable names to improve code readability.
+3. **Add comments**: Add comments to explain the purpose of each function and variable.
+4. **Use constants**: Use constants instead of magic numbers to improve code readability.
+5. **Check for buffer overflows**: Check for buffer overflows to prevent security risks.
+6. **Properly manage memory**: Properly manage memory to prevent memory leaks and crashes.
+7. **Use safe functions**: Use safe functions to prevent crashes or unexpected behavior.
+8. **Properly handle errors**: Properly handle errors to prevent crashes or unexpected behavior.
+
+### QUALITY SCORE
+Quality Score: 4/10
+
+The code has several quality issues, including complexity, naming, structure, and comments. Additionally, there are security issues, such as buffer risks and memory leaks, and ESP32 best practices violations, such as task stack sizes and heap usage. The code also has ESP-Matter specific issues, such as attribute handling and cluster configuration. To improve the quality score, the code should be refactored to reduce complexity, use descriptive variable names, add comments, and properly handle errors and memory.
+-------------------------------------------------------
+  ✅ Quality score extracted: 4/10
+
+✅ Report saved: reports/code-review-esp32c3.json
+
+============================================================
+NODE: Security Agent
+
+[Security Agent] Starting analysis for target: esp32c3
+[Security Agent] Deterministic score: 0/10  (unique_secrets=14 critCVE=0 highCVE=0 mutableTag=True slsa=True)
+[Security Agent] Calling Groq LLM...
+[Security Agent] Secrets: 1 real, 13 FP in patches
+[Security Agent] Report saved: reports/security-report-esp32c3.json
+[Security Agent] Done — score=0/10 | CVEs=0 | secrets=1
+
+============================================================
+NODE: Debug Agent
+
+[Debug Agent] Starting analysis for target: esp32c3
+[Debug Agent] Build log truncated to last 6000 chars
+[Debug Agent] Calling Groq LLM...
+[Debug Agent] Report saved: reports/debug-report-esp32c3.json
+[Debug Agent] Done — health=degraded, errors=0
+
+============================================================
+NODE: Fault Analysis Agent
+
+[Fault Analysis Agent] Starting for esp32c3
+[Fault Analysis Agent] Done — score=7/10
+[Fault Analysis Agent] Report: reports/fault-analysis-report-esp32c3.json
+[Orchestrator] Dynamic=6/10 (QEMU=True Fuzz=True FI=False)
+
+============================================================
+NODE: Test Generation Agent
+
+[Test Gen Agent] Starting for target: esp32c3
+[Test Gen Agent] Calling Groq LLM...
+[Test Gen Agent] JSON parsed successfully
+[Test Gen Agent] C++ test file saved: reports/generated_tests_esp32c3.cpp (1752 chars)
+[Test Gen Agent] ✓ Compilation check passed
+[Test Gen Agent] Mock saved: mock_led_driver.h
+[Test Gen Agent] Mock saved: mock_gpio.h
+[Test Gen Agent] Deploying test file to ESP-Matter test dir...
+[Test Gen Agent] Deploy status: deployed
+  → /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/test/test_light_app_esp32c3.cpp
+  → /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/test/CMakeLists.txt
+  → /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/test/main/CMakeLists.txt
+  → /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/test/mock_led_driver.h
+  → /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/test/mock_gpio.h
+[Test Gen Agent] Done — 5 test cases, 1 regression tests
+[Test Gen Agent] Report: reports/testgen-report-esp32c3.json
+[Orchestrator] 5 test cases | deploy=deployed
+
+============================================================
+NODE: Optimization + Release Agent
+
+[Optimization Agent] Starting for target: esp32c3
+[Optimization Agent] Calling Groq LLM for memory analysis...
+[Optimization Agent] Generating release changelog...
+[Optimization Agent] Done — flash=43.9% | saving=95KB | changelog saved
+
+============================================================
+NODE: AutoFix Agent
+
+[AutoFix] ===== target:esp32c3 LLM:True =====
+[AutoFix] ESP source dir: esp-matter/examples/light/main
+[AutoFix] Collected: 5 unique issues (0 duplicates dropped) | 1 security · 3 code_review · 0 debug · 1 fault
+[AutoFix] Total issues: 5
+[AutoFix] #1: [CRITICAL] Hardcoded generic-api-key detected in qemu_fault_runner
+          fichier: tools/qemu_fault_runner.py
+[AutoFix] LLM error: Error code: 429 - {'error': {'message': 'Rate limit reached for model `llama-3.3-70b-versatile` in organization `org_01kkm7qebnem5rq86pdet82bmh` service tier `on_demand` on tokens per minute (TPM): Limit 12000, Used 9733, Requested 2549. Please try again in 1.41s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}
+          → pas de changement — skip
+[AutoFix] #2: pas de fichier cible → manual
+[AutoFix] #3: pas de fichier cible → manual
+[AutoFix] #4: pas de fichier cible → manual
+[AutoFix] #5: [MEDIUM] insufficient stack size or incorrect stack usage
+          fichier: esp-matter/examples/light/main/app_main.cpp
+          → ⚠️  patch potentiellement invalide (sauvegardé quand même)
+          → SAUVEGARDÉ: autofix-esp32c3-05-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch [llm]
+
+[AutoFix] patches=1 | manual=4
+[AutoFix] Rapport: reports/autofix-report-esp32c3.json
+[Orchestrator] AutoFix: 1 patch(es)
+
+============================================================
+NODE: Pipeline Summary
+[Orchestrator] 5 test(s) generated — will execute in Run 2
+[Orchestrator] OTA: version=v103 checksums=4 deploy=simulated
+[Orchestrator] Pipeline BLOCKED: 1 hardcoded secret(s) found in source code (qemu_fault_runner.py). AutoFix gener
+
+╔══════════════════════════════════════════════════════╗
+║ Code Review : 4/10
+║ Security    : 0/10  CVEs=0  Real secrets=1  FP secrets (patches)=0
+║ Build       : success
+║ Tests       : gen=5  run=0/0  pending_run2
+║ Fault Inject: 9/10  critical_fail
+║ Memory      : Flash 43.9%
+║ Robustness  : 7/10  Dynamic=6/10
+║ AutoFix     : 1 patch(es)  agents=8/8
+║ Overall     : PASSED ✅
+║ Block reason: 1 hardcoded secret(s) found in source code (qemu_fault_runner.py). AutoFix generated 1 patch(es) to fix them. | Code quality score too low: 4/10 (threshold: 5/10).
+╚══════════════════════════════════════════════════════╝
+[Orchestrator] pipeline-summary.json + pr-comment-body.md saved

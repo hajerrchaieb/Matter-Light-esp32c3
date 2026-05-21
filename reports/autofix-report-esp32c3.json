@@ -1,0 +1,50 @@
+{
+  "agent": "autofix_agent",
+  "target": "esp32c3",
+  "generated_at": "2026-05-21T17:37:53.114726Z",
+  "llm_used": true,
+  "issues_analyzed": 5,
+  "patches_generated": 1,
+  "patch_files": [
+    "autofix-esp32c3-05-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch"
+  ],
+  "patches_detail": [
+    {
+      "patch_name": "autofix-esp32c3-05-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch",
+      "file": "esp-matter/examples/light/main/app_main.cpp",
+      "source_agent": "fault_analysis",
+      "severity": "medium",
+      "description": "insufficient stack size or incorrect stack usage",
+      "fix_method": "llm",
+      "valid": false
+    }
+  ],
+  "manual_instructions": [
+    {
+      "source_agent": "security",
+      "severity": "critical",
+      "description": "Hardcoded generic-api-key detected in qemu_fault_runner.py line 117. Action: Remove from code, rotate the secret, use env var via os.environ.get('VAR', '')",
+      "how_to_fix": "Replace with os.environ.get('VAR', '')"
+    },
+    {
+      "source_agent": "code_review",
+      "severity": "high",
+      "description": "1. **Buffer risks**: The `cdSpan` and `s_decryption_key` variables are not checked for buffer overflows.",
+      "how_to_fix": ""
+    },
+    {
+      "source_agent": "code_review",
+      "severity": "high",
+      "description": "**Memory leaks**: The `app_driver_handle_t` type is a void pointer, which can lead to memory leaks if not properly managed.",
+      "how_to_fix": ""
+    },
+    {
+      "source_agent": "code_review",
+      "severity": "high",
+      "description": "**Hardcoded values**: The `cd_start` and `cd_end` variables are hardcoded, which can be a security risk if the values are not properly validated.",
+      "how_to_fix": ""
+    }
+  ],
+  "status": "patches_generated",
+  "summary": "1 patch(es) g\u00e9n\u00e9r\u00e9s | 4 manuels."
+}
