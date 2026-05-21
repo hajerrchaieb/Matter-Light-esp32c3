@@ -47,12 +47,12 @@ env:
 # ════════════════════════════════════════════════════════════════════
 jobs:
   lint-and-validate:
-    name: 🔵 Stage 1 — Plan & Code Quality
+    name:  Stage 1 — Plan & Code Quality
     runs-on: ubuntu-latest
-    continue-on-error: true   # 🔥 NEVER block pipeline
+    continue-on-error: true   #  NEVER block pipeline
 
     steps:
-      - name: 📥 Checkout
+      - name:  Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -62,14 +62,14 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y yamllint cppcheck flawfinder clang-format python3-pip
           pip3 install bandit
-      # ✅ FIX 1 — yamllint NON-BLOCKING
+      #  FIX 1 — yamllint NON-BLOCKING
       - name: 🗂️ Validate Workflow YAML
         run: |
           yamllint -d relaxed .github/workflows/ || true
       - name: 📝 Lint Commit Messages
         if: github.event_name == 'pull_request' || github.ref == 'refs/heads/develop'
         uses: wagoid/commitlint-github-action@v5
-        continue-on-error: true   # 🔥 don't block
+        continue-on-error: true   #  don't block
 
       - name: 🔍 Dependency Review (PR only)
         if: github.event_name == 'pull_request'
@@ -94,13 +94,13 @@ jobs:
             if [ "$UNFORMATTED" -gt "0" ]; then
               echo "::warning::$UNFORMATTED file(s) have formatting issues — run clang-format"
             else
-              echo "✅ All files are properly formatted"
+              echo " All files are properly formatted"
             fi
           else
             echo "Source path not found: ${{ env.EXAMPLE_PATH }} — skipping clang-format"
           fi
-      # ✅ FIX 3 — Bandit NON-BLOCKING (already almost ok)
-      - name: 🔐 Python Security Scan (Bandit)
+      #  FIX 3 — Bandit NON-BLOCKING (already almost ok)
+      - name:  Python Security Scan (Bandit)
         run: |
           if find . -name "*.py" -not -path "./.git/*" | grep -q .; then
             bandit -r . --exclude './.git,./build' -lll -f json \
@@ -110,9 +110,9 @@ jobs:
             echo "No Python files found — skipping Bandit" \
               | tee ${{ env.REPORTS_DIR }}/bandit-report.json
           fi
-      # ✅ FIX 4 — cppcheck NEVER FAIL — also skips the test/ folder
+      #  FIX 4 — cppcheck NEVER FAIL — also skips the test/ folder
       # (Unity boilerplate triggers style warnings that are not bugs)
-      - name: 🔍 cppcheck Early Static Analysis
+      - name:  cppcheck Early Static Analysis
         run: |
           if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
             cppcheck \
@@ -540,7 +540,7 @@ jobs:
                 if /opt/espressif-qemu/bin/qemu-system-riscv32 --version 2>/dev/null; then
                   QEMU_INSTALLED=true
                   echo "QEMU_AVAILABLE=true" >> $GITHUB_ENV
-                  echo "✅ QEMU installed and functional"
+                  echo " QEMU installed and functional"
                   break
                 fi
               fi
@@ -1305,8 +1305,8 @@ jobs:
           fi
           echo "=== Pre-flight passed ==="
       # ════════════════════════════════════════════════════════════
-      # ✅ UPDATED STEP v5 — Run AI Agents Orchestrator
-      # FIX: robust JSON parsing without nested shell quoting issues,
+      # — Run AI Agents Orchestrator
+      # robust JSON parsing without nested shell quoting issues,
       #      explicit error handling if pipeline-summary.json missing,
       #      full debug dump always visible.
       # ════════════════════════════════════════════════════════════
@@ -1402,7 +1402,7 @@ jobs:
             print(f"::warning::Regression detection error: {e}")
           PYEOF
       # ════════════════════════════════════════════════════════════
-      # ✅ UPDATED STEP v5 — Post AI Summary to GitHub Step Summary
+      # Post AI Summary to GitHub Step Summary
       # ════════════════════════════════════════════════════════════
       - name: Post AI Summary to GitHub
         if: always()
@@ -1538,7 +1538,7 @@ jobs:
           print("GitHub Step Summary written successfully")
           SUMMARY_EOF
       # ════════════════════════════════════════════════════════════
-      # ✅ UPDATED STEP v5 — Post AI Results as PR Comment
+      # — Post AI Results as PR Comment
       # ════════════════════════════════════════════════════════════
       - name: Post AI Results as PR Comment
         if: github.event_name == 'pull_request' && always()
