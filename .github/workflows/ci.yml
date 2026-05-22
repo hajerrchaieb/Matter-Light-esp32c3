@@ -2,10 +2,10 @@ name: ESP32 Matter — DevSecOps Full Lifecycle
 
 on:
   push:
-    branches: [main, develop]
-    tags: ['v*.*.*']
+    branches: [ main, develop ]
+    tags: [ 'v*.*.*' ]
   pull_request:
-    branches: [main, develop]
+    branches: [ main, develop ]
   schedule:
     - cron: '0 2 * * 1'
   workflow_dispatch:
@@ -47,12 +47,12 @@ env:
 # ════════════════════════════════════════════════════════════════════
 jobs:
   lint-and-validate:
-    name:  Stage 1 — Plan & Code Quality
+    name: 🔵 Stage 1 — Plan & Code Quality
     runs-on: ubuntu-latest
-    continue-on-error: true   #  NEVER block pipeline
+    continue-on-error: true   # 🔥 NEVER block pipeline
 
     steps:
-      - name:  Checkout
+      - name: 📥 Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -62,14 +62,14 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y yamllint cppcheck flawfinder clang-format python3-pip
           pip3 install bandit
-      #  FIX 1 — yamllint NON-BLOCKING
+      # ✅ FIX 1 — yamllint NON-BLOCKING
       - name: 🗂️ Validate Workflow YAML
         run: |
           yamllint -d relaxed .github/workflows/ || true
       - name: 📝 Lint Commit Messages
         if: github.event_name == 'pull_request' || github.ref == 'refs/heads/develop'
         uses: wagoid/commitlint-github-action@v5
-        continue-on-error: true   #  don't block
+        continue-on-error: true   # 🔥 don't block
 
       - name: 🔍 Dependency Review (PR only)
         if: github.event_name == 'pull_request'
@@ -94,13 +94,13 @@ jobs:
             if [ "$UNFORMATTED" -gt "0" ]; then
               echo "::warning::$UNFORMATTED file(s) have formatting issues — run clang-format"
             else
-              echo " All files are properly formatted"
+              echo "✅ All files are properly formatted"
             fi
           else
             echo "Source path not found: ${{ env.EXAMPLE_PATH }} — skipping clang-format"
           fi
-      #  FIX 3 — Bandit NON-BLOCKING (already almost ok)
-      - name:  Python Security Scan (Bandit)
+      # ✅ FIX 3 — Bandit NON-BLOCKING (already almost ok)
+      - name: 🔐 Python Security Scan (Bandit)
         run: |
           if find . -name "*.py" -not -path "./.git/*" | grep -q .; then
             bandit -r . --exclude './.git,./build' -lll -f json \
@@ -110,9 +110,9 @@ jobs:
             echo "No Python files found — skipping Bandit" \
               | tee ${{ env.REPORTS_DIR }}/bandit-report.json
           fi
-      #  FIX 4 — cppcheck NEVER FAIL — also skips the test/ folder
+      # ✅ FIX 4 — cppcheck NEVER FAIL — also skips the test/ folder
       # (Unity boilerplate triggers style warnings that are not bugs)
-      - name:  cppcheck Early Static Analysis
+      - name: 🔍 cppcheck Early Static Analysis
         run: |
           if [ -d "${{ env.EXAMPLE_PATH }}" ]; then
             cppcheck \
@@ -540,7 +540,7 @@ jobs:
                 if /opt/espressif-qemu/bin/qemu-system-riscv32 --version 2>/dev/null; then
                   QEMU_INSTALLED=true
                   echo "QEMU_AVAILABLE=true" >> $GITHUB_ENV
-                  echo " QEMU installed and functional"
+                  echo "✅ QEMU installed and functional"
                   break
                 fi
               fi
@@ -559,51 +559,32 @@ jobs:
           mkdir -p ${{ env.REPORTS_DIR }}
           FW_DIR="${{ env.FIRMWARE_DIR }}/esp32c3"
           echo "Firmware files:"
-          ls -la "$FW_DIR/" || true
+          ls -la "$FW_DIR/"
           BOOTLOADER=$(find "$FW_DIR" -name "bootloader.bin" | head -1)
           PARTITION=$(find "$FW_DIR" -name "partition-table.bin" | head -1)
-          OTA_DATA=$(find "$FW_DIR" -name "ota_data_initial.bin" | head -1)
           APP=$(find "$FW_DIR" -maxdepth 1 -name "light.bin" | head -1)
           if [ -z "$APP" ]; then
             APP=$(find "$FW_DIR" -maxdepth 1 -name "*.bin" \
               ! -name "bootloader.bin" \
               ! -name "partition-table.bin" \
-              ! -name "ota_data_initial.bin" \
               ! -name "*-signed.bin" | head -1)
           fi
           echo "Bootloader : $BOOTLOADER"
           echo "Partition  : $PARTITION"
-          echo "OTA data   : ${OTA_DATA:-(not found)}"
           echo "App        : $APP"
           if [ -z "$BOOTLOADER" ] || [ -z "$PARTITION" ] || [ -z "$APP" ]; then
             echo "::warning::Missing firmware binaries — QEMU will be skipped"
             echo "QEMU_SKIP=true" >> $GITHUB_ENV
           else
-            OTA_ARGS=""
-            if [ -n "$OTA_DATA" ]; then
-              OTA_ARGS="0x1d000 $OTA_DATA"
-              echo "Including ota_data_initial.bin at 0x1d000"
-            else
-              echo "::warning::ota_data_initial.bin not found"
-            fi
-            esptool --chip esp32c3 merge-bin \
+            esptool.py --chip esp32c3 merge_bin \
               --output "$FW_DIR/flash_image.bin" \
-              --pad-to-size 4MB \
-              --flash-mode dio \
-              --flash-freq 80m \
-              --flash-size 4MB \
+              --flash_mode dio \
+              --flash_freq 80m \
+              --flash_size 4MB \
               0x0     "$BOOTLOADER" \
-              0xc000  "$PARTITION" \
-              $OTA_ARGS \
-              0x20000 "$APP"
+              0x8000  "$PARTITION" \
+              0x10000 "$APP"
             echo "Flash image created"
-            SIZE=$(stat -c%s "$FW_DIR/flash_image.bin" 2>/dev/null || echo 0)
-            echo "flash_image.bin size: $SIZE bytes (should be exactly 4194304)"
-            if [ "$SIZE" -ne "4194304" ]; then
-              echo "::warning::flash_image.bin is not 4MB — QEMU may reject it"
-            else
-              echo "Size OK: exactly 4MB — QEMU will accept it"
-            fi
             echo "QEMU_SKIP=false" >> $GITHUB_ENV
           fi
       - name: Run firmware in QEMU (45 second window)
@@ -611,23 +592,16 @@ jobs:
         run: |
           FW_DIR="${{ env.FIRMWARE_DIR }}/esp32c3"
           mkdir -p ${{ env.REPORTS_DIR }}
-          LOG="${{ env.REPORTS_DIR }}/qemu-run.log"
-          UART_LOG="${{ env.REPORTS_DIR }}/qemu-uart-raw.log"
-          echo "======== QEMU SESSION START ========" > "$LOG"
-          echo "Flash image: $(ls -lh $FW_DIR/flash_image.bin 2>/dev/null || echo MISSING)" >> "$LOG"
+          echo "======== QEMU SESSION START ========" \
+            > ${{ env.REPORTS_DIR }}/qemu-run.log
           timeout 45 qemu-system-riscv32 \
             -nographic \
-            -no-reboot \
             -machine esp32c3 \
             -drive file="$FW_DIR/flash_image.bin",if=mtd,format=raw \
-            -serial file:"$UART_LOG" \
-            2>>"$LOG" || true
-          echo "=== UART0 output ===" >> "$LOG"
-          cat "$UART_LOG" >> "$LOG" 2>/dev/null || echo "(no uart output)" >> "$LOG"
-          echo "======== QEMU SESSION END ========" >> "$LOG"
-          LINES=$(wc -l < "$UART_LOG" 2>/dev/null || echo 0)
-          echo "UART lines captured: $LINES"
-          head -15 "$UART_LOG" 2>/dev/null || true
+            -serial stdio \
+            2>&1 | tee -a ${{ env.REPORTS_DIR }}/qemu-run.log || true
+          echo "======== QEMU SESSION END ========" \
+            >> ${{ env.REPORTS_DIR }}/qemu-run.log
       - name: Parse QEMU UART log
         if: env.QEMU_SKIP != 'true'
         run: |
@@ -798,13 +772,12 @@ jobs:
           "
             exit 0
           fi
-          esptool --chip esp32c3 merge-bin \
+          esptool.py --chip esp32c3 merge_bin \
               --output "$FW_DIR/test_flash.bin" \
-              --pad-to-size 4MB \
-              --flash-mode dio --flash-freq 80m --flash-size 4MB \
+              --flash_mode dio --flash_freq 80m --flash_size 4MB \
               0x0     "$BOOTLOADER" \
-              0xc000  "$PARTITION" \
-              0x20000 "$APP" \
+              0x8000  "$PARTITION" \
+              0x10000 "$APP" \
               2>&1 | tail -5
           echo "=== Booting test firmware in QEMU (90 s window) ==="
           LOG=${{ env.REPORTS_DIR }}/qemu-test-run.log
@@ -1031,7 +1004,7 @@ jobs:
           fi
           # Always produce a valid JSON report (fallback if script failed/missing)
           if [ ! -f "${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json" ]; then
-            python3 -c "import json; json.dump({'target':'esp32c3','total_scenarios':0,'passed':0,'failed':0,'overall_status':'not_run','critical_failures':[],'high_failures':[],'by_family':{},'scenarios':[],'summary':'Fault injection not run.'}, open('${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json','w'), indent=2)"
+            python3 -c "import json; json.dump({'target':'esp32c3','total_scenarios':0,'passed':0,'failed':0,'overall_status':'not_run','critical_failures':[],'high_failures':[],'by_family':{},'scenarios':[],'summary':'Fault injection not run.'}, open('${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json','w'), indent=2)" 
             echo "Fallback fault-injection report written"
           fi
           # Show summary
@@ -1059,6 +1032,108 @@ jobs:
             ${{ env.REPORTS_DIR }}/fault-injection-report-esp32c3.json
             ${{ env.REPORTS_DIR }}/fault-injection-run.log
           retention-days: 30
+          # ── HIL BRANCHÉ : génère hil-report-{target}.json via QEMU comme proxy ──
+      - name: HIL Simulation — QEMU proxy test
+        id: hil_sim
+        run: |
+          TARGET="${{ matrix.target }}"
+          REPORT="reports/hil-report-${TARGET}.json"
+          mkdir -p reports
+          # Vérifie si le firmware existe (généré au Stage 4)
+          FIRMWARE=$(ls firmware/light.bin 2>/dev/null || ls firmware/*.bin 2>/dev/null | head -1)
+          if [ -z "$FIRMWARE" ]; then
+            echo "No firmware binary found — HIL skipped"
+            cat > "$REPORT" << EOF
+          {
+            "status": "skipped",
+            "reason": "firmware binary not found",
+            "device": "${TARGET}-qemu-proxy",
+            "tests_run": 0,
+            "tests_passed": 0,
+            "tests_failed": 0,
+            "duration_s": 0,
+            "failures": []
+          }
+          EOF
+          else
+            echo "Running HIL simulation via QEMU for $TARGET..."
+            START=$(date +%s)
+            # Scénarios de test HIL simulés via QEMU
+            PASS=0
+            FAIL=0
+            FAILURES=()
+            # Test 1 : boot séquence
+            if timeout 30 qemu-system-riscv32 \
+              -nographic -machine esp32c3 \
+              -drive file="$FIRMWARE",if=mtd,format=raw \
+              -no-reboot 2>&1 | grep -q "I (.*) app_main"; then
+              PASS=$((PASS+1))
+              echo "  [HIL] boot_sequence: PASS"
+            else
+              FAIL=$((FAIL+1))
+              FAILURES+=("boot_sequence")
+              echo "  [HIL] boot_sequence: FAIL (timeout or no app_main log)"
+            fi
+            # Test 2 : Matter stack init
+            if timeout 45 qemu-system-riscv32 \
+              -nographic -machine esp32c3 \
+              -drive file="$FIRMWARE",if=mtd,format=raw \
+              -no-reboot 2>&1 | grep -q "CHIP:DL: BLE init"; then
+              PASS=$((PASS+1))
+              echo "  [HIL] matter_stack_init: PASS"
+            else
+              FAIL=$((FAIL+1))
+              FAILURES+=("matter_stack_init")
+              echo "  [HIL] matter_stack_init: FAIL"
+            fi
+            # Test 3 : no panic/exception at startup
+            BOOT_LOG=$(timeout 20 qemu-system-riscv32 \
+              -nographic -machine esp32c3 \
+              -drive file="$FIRMWARE",if=mtd,format=raw \
+              -no-reboot 2>&1 || true)
+            if echo "$BOOT_LOG" | grep -qE "Guru Meditation|panic|LoadProhibited"; then
+              FAIL=$((FAIL+1))
+              FAILURES+=("no_panic_at_boot")
+              echo "  [HIL] no_panic_at_boot: FAIL"
+            else
+              PASS=$((PASS+1))
+              echo "  [HIL] no_panic_at_boot: PASS"
+            fi
+            END=$(date +%s)
+            DURATION=$((END-START))
+            TOTAL=$((PASS+FAIL))
+            STATUS="pass"
+            [ $FAIL -gt 0 ] && STATUS="fail"
+            # Sérialise les failures en JSON
+            FAIL_JSON="["
+            for f in "${FAILURES[@]}"; do
+              FAIL_JSON+="\"$f\","
+            done
+            FAIL_JSON="${FAIL_JSON%,}]"
+            cat > "$REPORT" << EOF
+          {
+            "status": "$STATUS",
+            "device": "${TARGET}-qemu-proxy",
+            "tests_run": $TOTAL,
+            "tests_passed": $PASS,
+            "tests_failed": $FAIL,
+            "pass_rate": $(echo "scale=1; $PASS * 100 / $TOTAL" | bc 2>/dev/null || echo "0"),
+            "duration_s": $DURATION,
+            "firmware_tested": "$FIRMWARE",
+            "test_scenarios": ["boot_sequence", "matter_stack_init", "no_panic_at_boot"],
+            "failures": $FAIL_JSON
+          }
+          EOF
+          fi
+          echo "HIL report:"
+          cat "$REPORT"
+        continue-on-error: true
+
+      - name: Upload HIL report
+        uses: actions/upload-artifact@v4
+        with:
+          name: hil-report-${{ matrix.target }}
+          path: reports/hil-report-${{ matrix.target }}.json
 
 # ════════════════════════════════════════════════════════════════════
 # STAGE 6 — FIRMWARE SECURITY AUDIT
@@ -1305,8 +1380,8 @@ jobs:
           fi
           echo "=== Pre-flight passed ==="
       # ════════════════════════════════════════════════════════════
-      # — Run AI Agents Orchestrator
-      # robust JSON parsing without nested shell quoting issues,
+      # ✅ UPDATED STEP v5 — Run AI Agents Orchestrator
+      # FIX: robust JSON parsing without nested shell quoting issues,
       #      explicit error handling if pipeline-summary.json missing,
       #      full debug dump always visible.
       # ════════════════════════════════════════════════════════════
@@ -1402,7 +1477,7 @@ jobs:
             print(f"::warning::Regression detection error: {e}")
           PYEOF
       # ════════════════════════════════════════════════════════════
-      # Post AI Summary to GitHub Step Summary
+      # ✅ UPDATED STEP v5 — Post AI Summary to GitHub Step Summary
       # ════════════════════════════════════════════════════════════
       - name: Post AI Summary to GitHub
         if: always()
@@ -1538,7 +1613,7 @@ jobs:
           print("GitHub Step Summary written successfully")
           SUMMARY_EOF
       # ════════════════════════════════════════════════════════════
-      # — Post AI Results as PR Comment
+      # ✅ UPDATED STEP v5 — Post AI Results as PR Comment
       # ════════════════════════════════════════════════════════════
       - name: Post AI Results as PR Comment
         if: github.event_name == 'pull_request' && always()
