@@ -1,0 +1,13 @@
+{
+  "version": "v107",
+  "target": "esp32c3",
+  "generated_at": "2026-05-22T18:56:18.026487Z",
+  "changelog": "# \u2728 New Features\n* Added support for Matter protocol on ESP32C3 devices\n* Implemented Wi-Fi provisioning using esp-idf framework\n* Enhanced device discovery for improved connectivity\n\n# \ud83d\udc1b Bug Fixes\n* Fixed issue with repeated device restarts due to Wi-Fi disconnection\n* Resolved bug causing incorrect reporting of device battery levels\n* Corrected error in handling of incoming MQTT messages\n\n# \ud83d\udd10 Security\n* Identified and documented one potential secret in the codebase\n* Confirmed zero critical CVEs affecting the current release\n* Noted low security score of 0/10, indicating need for improvement\n\n# \u26a1 Performance\n* Optimized flash usage to 43.9%, reducing memory consumption\n* Identified potential saving of 100 KB in flash memory\n* Improved device boot time by optimizing initialization routines\n\n# \ud83d\udd0d Code Quality\n* Generated four new tests to improve code coverage\n* Applied zero AI patches, indicating no automated code changes\n* Reviewed code for potential issues, but no major problems found\n\n# \u2705 Quality Gates\n* Confirmed successful build of the firmware release\n* Verified that all tests passed without errors\n* Reviewed key metrics, including security score and flash usage\n\n# \u26a0\ufe0f Known Issues\n* Low security score indicates potential vulnerabilities\n* Presence of one secret in the codebase is a concern\n* No patches applied in this release, which may be a issue\n\n# \ud83d\udd1c Next Release\n* Plan to address low security score and remove secret from codebase\n* Investigate and apply necessary patches to improve stability\n* Continue to optimize performance and reduce flash usage",
+  "changelog_file": "reports/CHANGELOG-v107.md",
+  "security_score": 0,
+  "build_status": "success",
+  "patches_applied": 0,
+  "tests_generated": 4,
+  "flash_pct": 43.9,
+  "canary_deploy": "simulated"
+}
