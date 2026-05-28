@@ -1,0 +1,121 @@
+{
+  "status": "partial",
+  "total": 5,
+  "passed": 5,
+  "failed": 0,
+  "ignored": 0,
+  "generated_at": "2026-05-28T11:08:37.588477Z",
+  "runners": {
+    "host": {
+      "status": "pass",
+      "total": 5,
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "tests": [
+        {
+          "name": "test_on_off_cluster_toggle",
+          "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+          "line": 51,
+          "status": "PASS",
+          "message": ""
+        },
+        {
+          "name": "test_null_endpoint_handled",
+          "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+          "line": 52,
+          "status": "PASS",
+          "message": ""
+        },
+        {
+          "name": "test_invalid_attribute_type",
+          "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+          "line": 53,
+          "status": "PASS",
+          "message": ""
+        },
+        {
+          "name": "test_malloc_exhaustion",
+          "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+          "line": 54,
+          "status": "PASS",
+          "message": ""
+        },
+        {
+          "name": "test_stack_overflow",
+          "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+          "line": 55,
+          "status": "PASS",
+          "message": ""
+        }
+      ],
+      "runner": "host",
+      "log_file": "reports/host-test-run.log",
+      "log_lines": 15,
+      "generated_at": "2026-05-28T11:05:14.844119Z"
+    },
+    "qemu": {
+      "runner": "qemu",
+      "status": "skipped",
+      "total": 0,
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "note": "QEMU skipped",
+      "coverage": "QEMU integration covers: real ESP-IDF \u00b7 Matter commissioning \u00b7 NVS persistence \u00b7 FreeRTOS scheduling.",
+      "boot_test": {
+        "status": "pass",
+        "boot_success": true,
+        "matter_started": true,
+        "panics": 0,
+        "watchdogs": 0,
+        "summary": "Boot: OK | Panics: 0 | Status: PASS"
+      }
+    }
+  },
+  "summary": "host=pass qemu=skipped -> canonical=partial (5/5 passed, 0 failed, 0 ignored)",
+  "test_lines": [],
+  "note": "QEMU skipped",
+  "tests": [
+    {
+      "name": "test_on_off_cluster_toggle",
+      "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+      "line": 51,
+      "status": "PASS",
+      "message": "",
+      "runner": "host"
+    },
+    {
+      "name": "test_null_endpoint_handled",
+      "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+      "line": 52,
+      "status": "PASS",
+      "message": "",
+      "runner": "host"
+    },
+    {
+      "name": "test_invalid_attribute_type",
+      "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+      "line": 53,
+      "status": "PASS",
+      "message": "",
+      "runner": "host"
+    },
+    {
+      "name": "test_malloc_exhaustion",
+      "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+      "line": 54,
+      "status": "PASS",
+      "message": "",
+      "runner": "host"
+    },
+    {
+      "name": "test_stack_overflow",
+      "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+      "line": 55,
+      "status": "PASS",
+      "message": "",
+      "runner": "host"
+    }
+  ]
+}
