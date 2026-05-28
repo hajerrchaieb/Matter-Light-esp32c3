@@ -69,7 +69,7 @@ def _simulate_gdb_output(scenario_name: str) -> str:
         # Avec eux  : panic=True, reboots=1 → REBOOT (rang 3) == REBOOT → PASS ✓
         "stack_overflow_trigger":
             "Breakpoint 1 at app_main\n"
-            "Stack canary corrupted: 0xDEADBEEF written at sp-64\n"
+            "Stack canary corrupted: 0xDEADBEEF written at sp-64\n"  # gitleaks:allow
             "Guru Meditation Error: Core 0 panic'ed (Stack overflow)\n"
             "Backtrace: 0x40380000:0x3ffb0000 0x4037a000:0x3ffb0020\n"
             "Rebooting...\n"
@@ -80,7 +80,7 @@ def _simulate_gdb_output(scenario_name: str) -> str:
         # "abort() was called" → panic=True, pas de reboot → CRASH ✓
         "heap_use_after_free":
             "Breakpoint 1, app_driver_init () at app_driver.cpp:45\n"
-            "Wrote 0xDEADC0DE to freed chunk header\n"
+            "Wrote 0xDEADC0DE to freed chunk header\n" # gitleaks:allow
             "abort() was called at PC 0x4038ABCD on core 0\n"
             "Heap corruption detected — invalid chunk header\n"
             "Backtrace: 0x4038ABCD:0x3ffb0100\n",
