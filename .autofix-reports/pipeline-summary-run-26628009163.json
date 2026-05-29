@@ -1,0 +1,136 @@
+{
+  "target": "esp32c3",
+  "version": "v120",
+  "pipeline_passed": true,
+  "errors_found": true,
+  "second_run_ready": true,
+  "block_reason": "1 secret(s) hardcod\u00e9(s) dans le code source (qemu_fault_runner.py). AutoFix a g\u00e9n\u00e9r\u00e9 2 patch(es).",
+  "agents_run": 7,
+  "stage_results": {
+    "code_quality": {
+      "score": 6,
+      "quality_score": 6,
+      "issues": 0
+    },
+    "security": {
+      "score": 0,
+      "cves": 0,
+      "secrets": 1,
+      "secrets_found": 1,
+      "secrets_in_patches": 0,
+      "real_secrets": [
+        {
+          "type": "generic-api-key",
+          "rule": "generic-api-key",
+          "file": "tools/qemu_fault_runner.py",
+          "line": 117,
+          "match": "nvs_key_not_found : REDACTED",
+          "risk": "critical",
+          "action": "Remove from code, rotate the secret, use env var via os.environ.get('VAR', '')"
+        }
+      ],
+      "intentional_bug_demo": false
+    },
+    "build": {
+      "status": "success"
+    },
+    "memory": {
+      "flash_pct": 43.9
+    },
+    "tests": {
+      "generated": 4,
+      "deployed": true,
+      "executed": 5,
+      "passed": 5,
+      "failed": 0,
+      "status": "partial",
+      "test_cases": [
+        {
+          "name": "test_on_off_cluster_toggle",
+          "type": "unit",
+          "area": "on_off"
+        },
+        {
+          "name": "test_null_endpoint_handled",
+          "type": "robustness",
+          "area": "matter_null_endpoint"
+        },
+        {
+          "name": "test_malloc_exhaustion_graceful",
+          "type": "robustness",
+          "area": "memory"
+        },
+        {
+          "name": "test_stack_overflow_detection",
+          "type": "robustness",
+          "area": "stack"
+        }
+      ]
+    },
+    "fault_injection": {
+      "total": 10,
+      "passed": 9,
+      "status": "critical_fail",
+      "robustness_score": 7,
+      "dynamic_score": 6
+    },
+    "hil": {
+      "status": "not_run",
+      "tests_run": 0,
+      "tests_passed": 0,
+      "tests_failed": 0,
+      "pass_rate": 0,
+      "device": "esp32c3-qemu-proxy",
+      "duration_s": null,
+      "failures": [],
+      "contributes_to_dynamic_score": true,
+      "weight_in_dynamic": "5%"
+    },
+    "autofix": {
+      "patches_generated": 2,
+      "patch_files": [
+        "autofix-esp32c3-01-security-tools_qemu_fault_runner.py.patch",
+        "autofix-esp32c3-05-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch"
+      ],
+      "issues_analyzed": 5,
+      "status": "patches_generated",
+      "patches_detail": [
+        {
+          "patch_name": "autofix-esp32c3-01-security-tools_qemu_fault_runner.py.patch",
+          "file": "tools/qemu_fault_runner.py",
+          "source_agent": "security",
+          "severity": "critical",
+          "description": "Hardcoded generic-api-key detected in qemu_fault_runner.py line 117. Action: Remove from code, rotate the secret, use env var via os.environ.get('VAR', '')",
+          "fix_method": "llm",
+          "valid": false
+        },
+        {
+          "patch_name": "autofix-esp32c3-05-fault_analysis-esp-matter_examples_light_main_app_main.cpp.patch",
+          "file": "esp-matter/examples/light/main/app_main.cpp",
+          "source_agent": "fault_analysis",
+          "severity": "medium",
+          "description": "insufficient stack size or uncontrolled recursion",
+          "fix_method": "llm",
+          "valid": false
+        }
+      ],
+      "manual_count": 3,
+      "fix_method": "llm"
+    },
+    "release": {
+      "version": "v120",
+      "canary_deploy": "simulated",
+      "ota_manifest_present": true,
+      "ota_commit": "\u2014",
+      "ota_checksums": {
+        "bootloader.bin": "81bf7686f788cc9be651c5e2e3c078567f696d53bfd97aad306902bcf2286689",
+        "light.bin": "bb8084cb65d38e45bbf0c2dbf38acdac1cb4aa8cd39269435bef26e9e9fbb5c8",
+        "ota_data_initial.bin": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f",
+        "partition-table.bin": "c6539908b518612e4e8c25566a3d6b232f195b5f604390d9050bb24cd9b3561c"
+      },
+      "rollout_pct": 10,
+      "protocol": "ESP-Matter OTA",
+      "ota_note": null
+    }
+  }
+}

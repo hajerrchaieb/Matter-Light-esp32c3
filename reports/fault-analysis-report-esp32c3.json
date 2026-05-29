@@ -1,0 +1,77 @@
+{
+  "target": "esp32c3",
+  "robustness_score": 7,
+  "score_justification": "The esp32c3 scored 7 out of 10 due to one critical failure in the stack_overflow_trigger scenario and no high-severity failures. The device handled most scenarios as expected, including memory and NVS-related tests, but the critical failure in the stack overflow scenario brings down the overall score.",
+  "failed_scenarios_analysis": [
+    {
+      "scenario": "stack_overflow_trigger",
+      "family": "memory",
+      "cwe": "CWE-121",
+      "root_cause": "insufficient stack size or uncontrolled recursion",
+      "fix_code": "increase stack size or implement recursion limits",
+      "effort": "medium"
+    }
+  ],
+  "passed_scenarios_highlights": [
+    {
+      "scenario": "nvs_magic_corruption",
+      "why_good": "correctly calls nvs_flash_erase()"
+    },
+    {
+      "scenario": "malloc_exhaustion",
+      "why_good": "handled memory exhaustion as expected"
+    },
+    {
+      "scenario": "null_pointer_deref",
+      "why_good": "handled null pointer dereference as expected"
+    }
+  ],
+  "family_assessments": {
+    "memory": {
+      "score": 6,
+      "verdict": "NEEDS_IMPROVEMENT",
+      "top_recommendation": "increase stack size and implement recursion limits"
+    },
+    "nvs": {
+      "score": 8,
+      "verdict": "GOOD",
+      "top_recommendation": "continue to use nvs_flash_erase() for corruption handling"
+    },
+    "matter": {
+      "score": 7,
+      "verdict": "ACCEPTABLE",
+      "top_recommendation": "separate Matter protocol handling into distinct modules"
+    }
+  },
+  "priority_fixes": [
+    "1. [CRITICAL] Fix stack overflow trigger by increasing stack size or implementing recursion limits",
+    "2. [HIGH] Improve code structure and naming conventions for better maintainability",
+    "3. [MEDIUM] Separate Matter protocol handling into distinct modules for better modularity"
+  ],
+  "overall_verdict": "NEEDS_IMPROVEMENT",
+  "summary": "The esp32c3 demonstrated a robustness score of 7 due to its ability to handle most scenarios, but a critical failure in the stack overflow trigger scenario requires immediate attention. Improving code structure and separating concerns will also enhance maintainability and modularity.",
+  "fault_runner_summary": {
+    "total": 10,
+    "passed": 9,
+    "failed": 1,
+    "status": "critical_fail",
+    "by_family": {
+      "memory": {
+        "total": 4,
+        "passed": 3,
+        "failed": 1
+      },
+      "nvs": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      },
+      "matter": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      }
+    }
+  },
+  "analysis_timestamp": "2026-05-29T09:18:29.491269"
+}

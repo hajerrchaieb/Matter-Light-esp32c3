@@ -1,0 +1,34 @@
+{
+  "target": "esp32c3",
+  "build_status": "success",
+  "compilation_errors": [],
+  "warnings": [
+    {
+      "type": "Kconfig warning",
+      "description": "The choice symbol SEC_CERT_DAC_PROVIDER is defined with a prompt outside the choice and has no effect on the build",
+      "impact": "low"
+    },
+    {
+      "type": "cppcheck warning",
+      "description": "Variable 'dac_provider' is assigned a value that is never used",
+      "impact": "low"
+    }
+  ],
+  "unit_test_status": "pass",
+  "unit_test_findings": [
+    {
+      "test": "All tests",
+      "result": "pass",
+      "note": "QEMU tests were skipped"
+    }
+  ],
+  "quality_gate_errors": 1,
+  "quality_gate_status": "fail",
+  "prioritised_actions": [
+    "Review and fix the unused variable 'dac_provider' in app_main.cpp",
+    "Investigate the Kconfig warning for SEC_CERT_DAC_PROVIDER",
+    "Run QEMU tests to ensure full test coverage"
+  ],
+  "overall_health": "degraded",
+  "summary": "The build was successful, but there are some warnings and a quality gate error due to an unused variable. The unit tests passed, but QEMU tests were skipped. Reviewing and fixing these issues will improve the overall health of the project."
+}
