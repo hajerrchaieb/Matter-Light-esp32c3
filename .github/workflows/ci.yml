@@ -299,6 +299,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          docker image prune -af || true
+          docker container prune -f || true
+          docker system prune -af || true
+
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/lib/android
+
+          sudo rm -rf /root/.cache
+          sudo rm -rf /root/.cipd-cache-dir
+
+          df -h
 
       - name: Cache ccache
         uses: actions/cache@v4
