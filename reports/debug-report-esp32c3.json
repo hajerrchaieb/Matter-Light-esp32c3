@@ -1,0 +1,39 @@
+{
+  "target": "esp32c3",
+  "build_status": "success",
+  "compilation_errors": [],
+  "warnings": [
+    {
+      "type": "Kconfig warning",
+      "description": "default on the choice symbol SEC_CERT_DAC_PROVIDER will have no effect",
+      "impact": "low"
+    },
+    {
+      "type": "Kconfig warning",
+      "description": "the choice symbol SEC_CERT_DAC_PROVIDER is defined with a prompt outside the choice",
+      "impact": "low"
+    },
+    {
+      "type": "cppcheck warning",
+      "description": "Variable 'dac_provider' is assigned a value that is never used",
+      "impact": "low"
+    }
+  ],
+  "unit_test_status": "not_implemented",
+  "unit_test_findings": [
+    {
+      "test": "unit tests",
+      "result": "missing",
+      "note": "no test file present, consider adding unit tests for better code coverage"
+    }
+  ],
+  "quality_gate_errors": 1,
+  "quality_gate_status": "fail",
+  "prioritised_actions": [
+    "Implement unit tests for better code coverage",
+    "Review and fix the unused variable 'dac_provider' in app_main.cpp",
+    "Investigate and resolve the Kconfig warnings for SEC_CERT_DAC_PROVIDER"
+  ],
+  "overall_health": "degraded",
+  "summary": "The build was successful, but there are some warnings and no unit tests present. The code quality gate failed due to an unused variable. Prioritised actions are provided to improve the overall health of the project."
+}
