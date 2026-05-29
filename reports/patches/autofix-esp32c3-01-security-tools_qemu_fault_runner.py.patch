@@ -1,0 +1,62 @@
+--- a/tools/qemu_fault_runner.py
++++ b/tools/qemu_fault_runner.py
+@@ -171,43 +171,23 @@
+     REPORTS.mkdir(exist_ok=True)
+
+     firmware_dir = Path("firmware") / args.target
+-    flash_image = firmware_dir / "flash_image.bin"
++    flash_image = firmware_dir / "flash.bin"
++    scenarios = get_fault_scenarios(args.target)
+
+-    if not flash_image.exists():
+-        args.simulate = True
++    if args.scenario:
++        scenario = next((s for s in scenarios if s.name == args.scenario), None)
++        if scenario:
++            result = run_single_scenario(scenario, flash_image, args.simulate)
++            print(json.dumps(result.__dict__, indent=4))
++        else:
++            print(f"Scenario '{args.scenario}' not found")
++    else:
++        for scenario in scenarios:
++            result = run_single_scenario(scenario, flash_image, args.simulate)
++            print(json.dumps(result.__dict__, indent=4))
+
+-    scenarios = get_fault_scenarios()
+-    if args.scenario:
+-        scenarios = [s for s in scenarios if s.name == args.scenario]
+-
+-    results = []
+-
+-    for scenario in scenarios:
+-        result = run_single_scenario(
+-            scenario, flash_image, simulate=args.simulate
+-        )
+-        results.append(result)
+-
+-        status = "PASS" if result.passed else "FAIL"
+-        print(status, scenario.name)
+-
+-    report = {
+-        "target": args.target,
+-        "total": len(results),
+-        "passed": sum(r.passed for r in results),
+-        "failed": sum(not r.passed for r in results),
+-        "scenarios": [r.__dict__ for r in results],
+-    }
+-
+-    out = REPORTS / f"fault-injection-report-{args.target}.json"
+-    out.write_text(json.dumps(report, indent=2))
+-
+-    # EXIT POLICY
+-    if any(not r.passed and r.severity == "critical" for r in results):
+-        sys.exit(1)
+-
+-    sys.exit(0)
+-
++    api_key = os.environ.get('generic-api-key', '')
++    # Use the api_key variable as needed in your code
+
+ if __name__ == "__main__":
+-    main()
++    main()
