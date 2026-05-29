@@ -1866,7 +1866,7 @@ jobs:
 # ════════════════════════════════════════════════════════════════════
 # STAGE 4c — OPTION C : FULL SECOND RUN (push branche autofix)
 # Déclenche un pipeline CI COMPLET avec agents AI sur le code patché
-# Nécessite le secret PAT_TOKEN (repo + workflow permissions)
+# Nécessite le secret PAT_TOKEN (repo + workflow permissionss)
 # ════════════════════════════════════════════════════════════════════
   full-second-run:
     name: Stage 4c — Full Second Run (Option C)
