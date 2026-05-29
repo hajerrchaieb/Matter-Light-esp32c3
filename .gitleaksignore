@@ -1,0 +1,12 @@
+.env
+reports/
+.autofix-reports/
+tools/qemu_fault_runner.py
+reports/patches/
+reports/host-test-run.log
+reports/qemu-test-run.log
+reports/qemu-run.log
+reports/patches/
+*.patch
+**/autofix-*.patch
+**/autofix-reports/*.patch
