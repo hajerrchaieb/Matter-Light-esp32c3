@@ -1,6 +1,6 @@
 """
-agents/autofix_agent.py — Agent 8 : AutoFix Agent — VERSION FINALE
-====================================================================
+agents/autofix_agent.py — Agent 8 : AutoFix Agent — VERSION FINALE v2
+======================================================================
 ARCHITECTURE HYBRIDE:
   - Prend les issues des agents précédents (security, code_review, debug, fault)
   - Pour chaque issue: LLM réécrit le fichier → difflib génère le .patch
@@ -14,19 +14,21 @@ FICHIERS LUS:
   esp-matter/examples/light/main/app_driver.cpp
   esp-matter/examples/light/main/app_priv.h
 
-RÈGLES DE MAPPING (fixes vs ancienne version):
+RÈGLES DE MAPPING:
   security source + secret keyword → demo/intentional_bug.py UNIQUEMENT
   code_review/debug/fault → app_main.cpp (C++ firmware)
   JAMAIS: issues C++ mappées sur demo/intentional_bug.py
 
-FIXES VS ANCIENNE VERSION:
-  FIX 1 — _make_diff: trailing whitespace " \\n" → "\\n" (patch valide)
+FIXES:
+  FIX 1 — _make_diff: trailing whitespace propre
   FIX 2 — _get_patch_target: issues C++ ne vont PLUS sur demo/
   FIX 3 — patches TOUJOURS sauvegardés (pas de blocage validate)
   FIX 4 — Rule-based engine: corrige sans LLM si LLM échoue
-  FIX 5 — _collect_issues: fallback garanti sur intentional_bug.py
-           quand tous les agents amont retournent 0 issues
-           → garantit toujours ≥1 patch → PR toujours créée
+  FIX 5 — _collect_issues: fallback garanti → injecte les bugs connus
+           de intentional_bug.py quand tous les agents retournent 0 issues
+  FIX 6 — _rule_based_fix_python: pattern division corrigé (sans parens)
+           + all-in-one patch: les 3 fixes appliqués en séquence sur le
+           même contenu de fichier avant de générer le diff
 """
 
 import difflib, json, os, re, subprocess, tempfile
@@ -98,11 +100,6 @@ def _read_file(path) -> str:
 # ════════════════════════════════════════════════════════════════════
 
 def _make_diff(repo_rel: str, original: str, modified: str) -> str:
-    """
-    Génère un unified diff propre.
-    FIX: les lignes vides en contexte sont encodées " \\n" par difflib.
-    patch --dry-run rejette ça → on remplace par "\\n" pur.
-    """
     raw_lines = list(difflib.unified_diff(
         original.splitlines(keepends=True),
         modified.splitlines(keepends=True),
@@ -112,7 +109,6 @@ def _make_diff(repo_rel: str, original: str, modified: str) -> str:
     ))
     cleaned = []
     for line in raw_lines:
-        # ligne de contexte qui est juste un espace → ligne vide propre
         if line.startswith(" ") and line.rstrip("\n\r").strip() == "":
             cleaned.append("\n")
         else:
@@ -125,12 +121,6 @@ def _make_diff(repo_rel: str, original: str, modified: str) -> str:
 # ════════════════════════════════════════════════════════════════════
 
 def _validate_info(diff: str, original: str, filename: str) -> bool:
-    """
-    Teste si le patch est valide avec patch --dry-run.
-    Retourne True/False mais NE BLOQUE PAS la sauvegarde.
-    Le patch est sauvegardé dans tous les cas.
-    Stage 4c fait git apply --check avant d'appliquer → filtre naturel.
-    """
     try:
         with tempfile.NamedTemporaryFile(
             suffix=Path(filename).suffix or ".txt",
@@ -150,11 +140,9 @@ def _validate_info(diff: str, original: str, filename: str) -> bool:
         )
         os.unlink(sp)
         os.unlink(pp)
-
         if r.returncode == 0:
             return True
 
-        # Essai secondaire avec --ignore-whitespace
         with tempfile.NamedTemporaryFile(
             suffix=Path(filename).suffix or ".txt",
             mode="w", encoding="utf-8", delete=False
@@ -176,7 +164,7 @@ def _validate_info(diff: str, original: str, filename: str) -> bool:
         return r2.returncode == 0
 
     except Exception:
-        return True  # si on ne peut pas valider, on suppose valide
+        return True
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -184,14 +172,6 @@ def _validate_info(diff: str, original: str, filename: str) -> bool:
 # ════════════════════════════════════════════════════════════════════
 
 def _get_patch_target(issue: dict):
-    """
-    Retourne (repo_relative_path, file_content) ou None.
-
-    RÈGLE PRINCIPALE:
-      security + keyword secret → demo/intentional_bug.py
-      code_review/debug/fault   → app_main.cpp (C++ firmware)
-      JAMAIS issues C++ sur demo/intentional_bug.py
-    """
     file_field = (issue.get("file") or "").strip()
     src_dir    = _find_esp_source_dir()
     desc_lower = issue.get("description", "").lower()
@@ -204,8 +184,7 @@ def _get_patch_target(issue: dict):
         if content:
             return file_field.lstrip("/"), content
 
-    # Try 2: demo/intentional_bug.py
-    # UNIQUEMENT pour les issues security avec keyword secret
+    # Try 2: demo/intentional_bug.py — UNIQUEMENT pour secret
     is_secret = (
         category == "secret_in_code"
         or any(kw in desc_lower for kw in (
@@ -221,9 +200,8 @@ def _get_patch_target(issue: dict):
                     print(f"[AutoFix]   → target: {demo_file} (secret issue)")
                     return demo_file, content
 
-    # Try 3: fichier C++ dans esp-matter (source dans le repo après sync)
+    # Try 3: fichier C++ dans esp-matter
     if src_dir:
-        # Fichier explicitement nommé dans l'issue
         basename = Path(file_field).name if file_field else ""
         for fn in CPP_SOURCE_FILES:
             if basename == fn or fn.lower() in desc_lower:
@@ -231,7 +209,6 @@ def _get_patch_target(issue: dict):
                 if p.exists():
                     return f"esp-matter/examples/light/main/{fn}", _read_file(p)
 
-        # Fallback app_main.cpp pour debug et fault_analysis
         if source in ("debug", "fault_analysis"):
             p = src_dir / "app_main.cpp"
             if p.exists():
@@ -241,7 +218,9 @@ def _get_patch_target(issue: dict):
 
 
 # ════════════════════════════════════════════════════════════════════
-# FIX 4 — RULE-BASED ENGINE (sans LLM)
+# FIX 4 + FIX 6 — RULE-BASED ENGINE
+# FIX 6: pattern division sans parenthèses (return a / b)
+#        + mode ALL-IN-ONE: les 3 fixes appliqués en séquence
 # ════════════════════════════════════════════════════════════════════
 
 def _rule_based_fix_python(content: str, issue: dict) -> str | None:
@@ -251,8 +230,10 @@ def _rule_based_fix_python(content: str, issue: dict) -> str | None:
     # CWE-798: secret hardcodé
     if any(k in desc for k in ("secret", "hardcoded", "api key", "api_key",
                                 "token", "credential", "cwe-798", "sk-demo")):
-        pat = re.compile(r'^([A-Z_][A-Z0-9_]*)\s*=\s*["\']([^"\']{4,})["\']',
-                         re.MULTILINE)
+        pat = re.compile(
+            r'^([A-Z_][A-Z0-9_]*)\s*=\s*["\']([^"\']{4,})["\']',
+            re.MULTILINE
+        )
         def _rep(m):
             var, val = m.group(1), m.group(2)
             if any(h in val.lower() for h in
@@ -266,15 +247,27 @@ def _rule_based_fix_python(content: str, issue: dict) -> str | None:
                 modified = "import os\n" + modified
 
     # CWE-369: division par zéro
+    # FIX 6: pattern sans parenthèses — "return a / b" (pas "return (a / b)")
     if any(k in desc for k in ("division", "zero", "cwe-369", "zerodivision")):
-        pat = re.compile(r'return\s+\(([^/\n]+)\s*/\s*(\w+)\)')
-        def _div(m):
+        # Avec parenthèses: return (num / div)
+        pat_paren = re.compile(r'return\s+\(([^/\n]+)\s*/\s*(\w+)\)')
+        def _div_paren(m):
             num, div = m.group(1).strip(), m.group(2).strip()
             return (f"if {div} == 0:\n        return 0.0\n"
                     f"    return ({num} / {div})")
-        new = pat.sub(_div, modified)
+        new = pat_paren.sub(_div_paren, modified)
         if new != modified:
             modified, changed = new, True
+        else:
+            # Sans parenthèses: return a / b
+            pat_simple = re.compile(r'return\s+(\w+)\s*/\s*(\w+)')
+            def _div_simple(m):
+                num, div = m.group(1).strip(), m.group(2).strip()
+                return (f"if {div} == 0:\n        return 0.0\n"
+                        f"    return {num} / {div}")
+            new2 = pat_simple.sub(_div_simple, modified)
+            if new2 != modified:
+                modified, changed = new2, True
 
     # CWE-476: None dereference
     if any(k in desc for k in ("null", "none", "cwe-476", "dereference",
@@ -292,14 +285,63 @@ def _rule_based_fix_python(content: str, issue: dict) -> str | None:
     return modified if changed else None
 
 
+def _rule_based_fix_python_all(content: str) -> str:
+    """
+    FIX 6 — ALL-IN-ONE: applique les 3 fixes python en séquence
+    sur le même contenu. Utilisé par le fallback garanti (FIX 5)
+    pour générer UN SEUL patch complet au lieu de 3 patches partiels.
+    """
+    modified = content
+
+    # Fix 1: secret hardcodé
+    pat1 = re.compile(
+        r'^([A-Z_][A-Z0-9_]*)\s*=\s*["\']([^"\']{4,})["\']',
+        re.MULTILINE
+    )
+    def _rep(m):
+        var, val = m.group(1), m.group(2)
+        if any(h in val.lower() for h in
+               ("sk-", "key", "token", "pass", "secret", "demo", "api", "gsk_")):
+            return f'{var} = os.environ.get("{var}", "")'
+        return m.group(0)
+    new = pat1.sub(_rep, modified)
+    if new != modified:
+        modified = new
+        if "import os" not in modified:
+            modified = "import os\n" + modified
+
+    # Fix 2: division par zéro (sans parenthèses)
+    pat2 = re.compile(r'return\s+(\w+)\s*/\s*(\w+)')
+    def _div(m):
+        num, div = m.group(1).strip(), m.group(2).strip()
+        return (f"if {div} == 0:\n        return 0.0\n"
+                f"    return {num} / {div}")
+    new = pat2.sub(_div, modified)
+    if new != modified:
+        modified = new
+
+    # Fix 3: None dereference
+    pat3 = re.compile(
+        r'return\s+(\w+)\.(strip|lower|upper|split|replace|encode)\(\)')
+    def _none(m):
+        var, method = m.group(1), m.group(2)
+        return (f"if {var} is None:\n        return ''\n"
+                f"    return {var}.{method}()")
+    new = pat3.sub(_none, modified)
+    if new != modified:
+        modified = new
+
+    return modified
+
+
 def _rule_based_fix_cpp(content: str, issue: dict) -> str | None:
     desc = (issue.get("description", "") + " " + issue.get("category", "")).lower()
     modified, changed = content, False
 
     if any(k in desc for k in ("null", "malloc", "heap", "cwe-476", "null pointer")):
         pat = re.compile(
-            r'([ \t]*)([\\w *]+\\*?\\s*(\\w+)\\s*=\\s*'
-            r'(?:malloc|calloc|heap_caps_malloc)\\s*\\([^;]+\\);)',
+            r'([ \t]*)(\w[\w *]*\*?\s*(\w+)\s*=\s*'
+            r'(?:malloc|calloc|heap_caps_malloc)\s*\([^;]+\);)',
             re.MULTILINE)
         def _null(m):
             ind, decl, var = m.group(1), m.group(2), m.group(3)
@@ -338,12 +380,11 @@ def _llm_fix(issue: dict, content: str, filename: str, is_python: bool) -> str |
              "=== ORIGINAL ===\n{src}\n=== END ===\nReturn corrected file only."),
         ])
         out = (prompt | llm | StrOutputParser()).invoke({
-            "fn":  filename,
+            "fn":   filename,
             "desc": issue.get("description", ""),
             "fix":  issue.get("suggested_fix", ""),
             "src":  content[:5000],
         })
-        # Nettoyer les balises markdown éventuelles
         out = re.sub(r"^```[a-zA-Z+]*\n?", "", out.strip())
         out = re.sub(r"\n?```$", "", out).strip()
         if len(out) < 30:
@@ -364,22 +405,15 @@ def _llm_fix(issue: dict, content: str, filename: str, is_python: bool) -> str |
 
 def _collect_issues(reports: dict) -> list:
     """
-    Collect issues from every upstream agent report and deduplicate
-    them so AutoFix doesn't generate duplicate patches/instructions.
-
-    DEDUP STRATEGY:
-       Two issues are considered "the same" if they share
-       (source_agent, file, category, first 80 chars of description).
-       This catches the case of multiple commits referencing the same
-       secret as well as the case of LLM-generated bullets that
-       overlap.
+    Collecte les issues de tous les agents amont et déduplique.
 
     FIX 5 — FALLBACK GARANTI:
-       Si tous les agents amont retournent 0 issues (ex: Gitleaks
-       ignore le fichier demo, code_review ne trouve rien, etc.),
-       on injecte directement les 3 bugs connus de intentional_bug.py.
-       Cela garantit que AutoFix génère toujours ≥1 patch →
-       Stage 4c crée toujours une branche → PR toujours créée.
+      Si tous les agents retournent 0 issues (Gitleaks ignore le fichier
+      demo, code_review ne trouve rien, etc.), on injecte directement
+      UN SEUL issue "all-in-one" sur intentional_bug.py.
+      Cela garantit ≥1 patch → Stage 4c crée une branche → PR créée.
+      L'issue all-in-one est traitée par _rule_based_fix_python_all()
+      qui applique les 3 corrections en séquence sur le même fichier.
     """
     raw_issues = []
 
@@ -420,21 +454,19 @@ def _collect_issues(reports: dict) -> list:
     else:
         review_text = cr.get("review", "")
         if review_text:
-            import re as _re
-            sections = _re.split(r"##\s+", review_text)
+            sections = re.split(r"##\s+", review_text)
             for section in sections:
                 lines = section.strip().splitlines()
                 if not lines:
                     continue
                 header = lines[0].lower()
-                content = "\n".join(lines[1:]).strip()
-                if not content or len(content) < 20:
+                body = "\n".join(lines[1:]).strip()
+                if not body or len(body) < 20:
                     continue
                 if not any(k in header for k in
                            ("security", "critical", "unsafe", "buffer")):
                     continue
-                bullets = _re.split(r"\n[-*•]\s*|\n\d+\.\s*", content)
-                # Cap at 3 bullets per section to avoid spam
+                bullets = re.split(r"\n[-*•]\s*|\n\d+\.\s*", body)
                 for bullet in bullets[:3]:
                     bullet = bullet.strip()
                     if len(bullet) > 30:
@@ -473,10 +505,9 @@ def _collect_issues(reports: dict) -> list:
         })
 
     # ── FIX 5 — FALLBACK GARANTI ───────────────────────────────────
-    # Si tous les agents amont retournent 0 issues, on injecte
-    # directement les 3 bugs connus de demo/intentional_bug.py.
-    # Cela garantit ≥1 patch généré → Stage 4c crée une branche → PR.
-    # Ces issues sont ajoutées UNIQUEMENT si raw_issues est vide.
+    # Injecte UN SEUL issue all-in-one si 0 issues collectées.
+    # Marqué category="all_in_one" → run_autofix_agent() le détecte
+    # et appelle _rule_based_fix_python_all() directement.
     if not raw_issues:
         demo_path = None
         for candidate in DEMO_BUG_FILES:
@@ -485,67 +516,32 @@ def _collect_issues(reports: dict) -> list:
                 break
         if demo_path:
             print(f"[AutoFix] FIX 5 — 0 issues from agents → "
-                  f"injecting known bugs from {demo_path}")
-            raw_issues.extend([
-                {
-                    "source_agent":  "security",
-                    "severity":      "critical",
-                    "file":          demo_path,
-                    "line":          "3",
-                    "description":   (
-                        "Hardcoded API key detected in intentional_bug.py line 3. "
-                        "DEMO_API_KEY contains a hardcoded secret string. "
-                        "Action: rotate immediately"
-                    ),
-                    "suggested_fix": "Replace with os.environ.get('DEMO_API_KEY', '')",
-                    "category":      "secret_in_code",
-                },
-                {
-                    "source_agent":  "code_review",
-                    "severity":      "high",
-                    "file":          demo_path,
-                    "line":          "6",
-                    "description":   (
-                        "CWE-369: Division by zero — compute_ratio(10, 0) "
-                        "called unconditionally in __main__ block. "
-                        "Missing zero-divisor guard."
-                    ),
-                    "suggested_fix": (
-                        "Add guard: if b == 0: return 0.0 before division"
-                    ),
-                    "category":      "quality",
-                },
-                {
-                    "source_agent":  "code_review",
-                    "severity":      "high",
-                    "file":          demo_path,
-                    "line":          "10",
-                    "description":   (
-                        "CWE-476: None dereference — process_data({}) returns None "
-                        "then .strip() is called unconditionally. "
-                        "Will raise AttributeError at runtime."
-                    ),
-                    "suggested_fix": (
-                        "Add None guard: if result is None: return ''"
-                    ),
-                    "category":      "quality",
-                },
-            ])
+                  f"injecting all-in-one fix for {demo_path}")
+            raw_issues.append({
+                "source_agent":  "security",
+                "severity":      "critical",
+                "file":          demo_path,
+                "description":   (
+                    "All-in-one fix: (1) CWE-798 hardcoded DEMO_API_KEY secret — "
+                    "replace with os.environ.get. "
+                    "(2) CWE-369 division by zero in compute_ratio — add zero guard. "
+                    "(3) CWE-476 None dereference in process_data — add None guard."
+                ),
+                "suggested_fix": "Apply all 3 security/quality fixes to intentional_bug.py",
+                "category":      "all_in_one",
+            })
         else:
-            print("[AutoFix] FIX 5 — 0 issues AND demo file not found. "
-                  "No fallback available.")
+            print("[AutoFix] FIX 5 — 0 issues AND demo file not found.")
 
-    # ── DEDUP step ─────────────────────────────────────────────────
+    # ── DEDUP ──────────────────────────────────────────────────────
     seen: set[tuple[str, str, str, str]] = set()
     issues = []
     for it in raw_issues:
-        # Dedup key: same agent + file + category + content prefix
-        # File may be empty → still works
         desc_prefix = (it.get("description") or "")[:80].lower().strip()
         key = (
-            it.get("source_agent",  ""),
-            it.get("file",           ""),
-            it.get("category",       ""),
+            it.get("source_agent", ""),
+            it.get("file",         ""),
+            it.get("category",     ""),
             desc_prefix,
         )
         if key in seen:
@@ -563,23 +559,15 @@ def _collect_issues(reports: dict) -> list:
     return issues
 
 
-
-
 # ════════════════════════════════════════════════════════════════════
 # MAIN — FIX 3: sauvegarde TOUJOURS les patches
 # ════════════════════════════════════════════════════════════════════
 
 def run_autofix_agent(target: str = TARGET, apply_patches: bool = False) -> dict:
-    """
-    Point d'entrée principal.
-    FIX 3: les patches sont TOUJOURS sauvegardés, même si _validate_info()
-    retourne False. Stage 4c fait git apply --check → filtre naturel.
-    """
     print(f"\n[AutoFix] ===== target:{target} LLM:{_LLM_AVAILABLE} =====")
     REPORTS.mkdir(exist_ok=True)
     PATCHES.mkdir(parents=True, exist_ok=True)
 
-    # Charger tous les rapports
     reports = {
         "security":    _load_json(REPORTS / f"security-report-{target}.json"),
         "code_review": _load_json(REPORTS / f"code-review-{target}.json"),
@@ -591,12 +579,55 @@ def run_autofix_agent(target: str = TARGET, apply_patches: bool = False) -> dict
     all_issues = _collect_issues(reports)
     print(f"[AutoFix] Total issues: {len(all_issues)}")
 
-    file_cache    = {}   # évite de lire plusieurs fois le même fichier
-    patched_files = set()  # FIX: dédupliquer — 1 seul patch par fichier cible
+    file_cache    = {}
+    patched_files = set()
     patches_done  = []
     manual_only   = []
 
     for idx, issue in enumerate(all_issues, 1):
+        # ── FIX 6: issue all-in-one → appel direct de _rule_based_fix_python_all
+        if issue.get("category") == "all_in_one":
+            demo_file = issue.get("file", "")
+            if not demo_file or not Path(demo_file).exists():
+                print(f"[AutoFix] #{idx}: all_in_one — demo file not found → skip")
+                manual_only.append(issue)
+                continue
+            original = _read_file(demo_file)
+            if not original:
+                print(f"[AutoFix] #{idx}: all_in_one — empty file → skip")
+                manual_only.append(issue)
+                continue
+            modified = _rule_based_fix_python_all(original)
+            if not modified or modified.strip() == original.strip():
+                print(f"[AutoFix] #{idx}: all_in_one — no change → skip")
+                manual_only.append(issue)
+                continue
+            diff = _make_diff(demo_file, original, modified)
+            if not diff.strip():
+                print(f"[AutoFix] #{idx}: all_in_one — empty diff → skip")
+                manual_only.append(issue)
+                continue
+            is_valid = _validate_info(diff, original, Path(demo_file).name)
+            status_icon = "✅" if is_valid else "⚠️ "
+            print(f"[AutoFix] #{idx}: [CRITICAL] all-in-one fix → {demo_file}")
+            print(f"          → {status_icon} patch {'valide' if is_valid else 'potentiellement invalide'}")
+            safe  = demo_file.replace("/", "_").replace("\\", "_")
+            pname = f"autofix-{target}-{idx:02d}-security-{safe}.patch"
+            (PATCHES / pname).write_text(diff, encoding="utf-8")
+            patches_done.append({
+                "patch_name":   pname,
+                "file":         demo_file,
+                "source_agent": "security",
+                "severity":     "critical",
+                "description":  issue["description"][:200],
+                "fix_method":   "rule_based_all_in_one",
+                "valid":        is_valid,
+            })
+            patched_files.add(demo_file)
+            print(f"          → SAUVEGARDÉ: {pname} [rule_based_all_in_one]")
+            continue
+
+        # ── Chemin normal ──────────────────────────────────────────
         info = _get_patch_target(issue)
         if not info:
             print(f"[AutoFix] #{idx}: pas de fichier cible → manual")
@@ -605,12 +636,10 @@ def run_autofix_agent(target: str = TARGET, apply_patches: bool = False) -> dict
 
         repo_rel, original = info
 
-        # FIX — dédupliquer: 1 seul patch par fichier cible
-        # Si 2 issues security pointent vers demo/intentional_bug.py
-        # → on garde seulement le premier patch (le second serait un conflit)
         if repo_rel in patched_files:
             print(f"[AutoFix] #{idx}: {repo_rel} déjà patché → skip doublon")
             continue
+
         current  = file_cache.get(repo_rel, original)
         is_py    = repo_rel.endswith(".py")
         basename = Path(repo_rel).name
@@ -619,11 +648,9 @@ def run_autofix_agent(target: str = TARGET, apply_patches: bool = False) -> dict
               f"{issue['description'][:55]}")
         print(f"          fichier: {repo_rel}")
 
-        # Niveau 1: LLM
         modified = _llm_fix(issue, current, basename, is_py)
         method   = "llm"
 
-        # Niveau 2: rule-based si LLM échoue ou ne change rien
         if not modified or modified.strip() == current.strip():
             rule_fn  = _rule_based_fix_python if is_py else _rule_based_fix_cpp
             modified = rule_fn(current, issue)
@@ -634,21 +661,18 @@ def run_autofix_agent(target: str = TARGET, apply_patches: bool = False) -> dict
             manual_only.append(issue)
             continue
 
-        # Générer le diff (avec fix trailing whitespace)
         diff = _make_diff(repo_rel, current, modified)
         if not diff.strip():
             print("          → diff vide — skip")
             manual_only.append(issue)
             continue
 
-        # FIX 3 — Valider en mode informatif (ne bloque PAS la sauvegarde)
         is_valid = _validate_info(diff, current, basename)
         if not is_valid:
-            print(f"          → ⚠️  patch potentiellement invalide (sauvegardé quand même)")
+            print("          → ⚠️  patch potentiellement invalide (sauvegardé quand même)")
         else:
-            print(f"          → ✅ patch valide")
+            print("          → ✅ patch valide")
 
-        # Sauvegarder TOUJOURS le patch
         safe  = repo_rel.replace("/", "_").replace("\\", "_")
         pname = f"autofix-{target}-{idx:02d}-{issue['source_agent']}-{safe}.patch"
         (PATCHES / pname).write_text(diff, encoding="utf-8")
@@ -663,13 +687,11 @@ def run_autofix_agent(target: str = TARGET, apply_patches: bool = False) -> dict
             "fix_method":   method,
             "valid":        is_valid,
         })
-        patched_files.add(repo_rel)  # FIX — marquer ce fichier comme patché
+        patched_files.add(repo_rel)
         print(f"          → SAUVEGARDÉ: {pname} [{method}]")
 
-    # Générer APPLY_ALL.sh
     _write_apply_script(list(PATCHES.glob("*.patch")), target)
 
-    # Appliquer immédiatement si demandé (usage CLI)
     if apply_patches and patches_done:
         print("[AutoFix] Application des patches via git apply...")
         for p in patches_done:
@@ -680,7 +702,6 @@ def run_autofix_agent(target: str = TARGET, apply_patches: bool = False) -> dict
             status = "OK" if r.returncode == 0 else f"Skip({r.stderr[:60]})"
             print(f"  {status}: {p['patch_name']}")
 
-    # Rapport final
     instructions = [{
         "source_agent": i["source_agent"],
         "severity":     i["severity"],
@@ -695,7 +716,7 @@ def run_autofix_agent(target: str = TARGET, apply_patches: bool = False) -> dict
         "generated_at":        datetime.utcnow().isoformat() + "Z",
         "llm_used":            _LLM_AVAILABLE,
         "issues_analyzed":     len(all_issues),
-        "patches_generated":   n,          # orchestrator lit cette clé
+        "patches_generated":   n,
         "patch_files":         [p["patch_name"] for p in patches_done],
         "patches_detail":      patches_done,
         "manual_instructions": instructions,
@@ -722,9 +743,6 @@ def _write_apply_script(patch_files: list, target: str) -> Path:
         "",
         "APPLIED=0; SKIPPED=0",
         'SCRIPT_DIR="$(dirname "$0")"',
-        "",
-        "# Appliquer les patches Python directement (git apply)",
-        "# Appliquer les patches C++ dans esp-matter/",
         "",
     ]
     for pf in sorted(Path(p) for p in patch_files):
@@ -766,7 +784,7 @@ def run(): return run_autofix_agent()
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser()
-    p.add_argument("--target",  default=os.getenv("TARGET_CHIP", TARGET))
-    p.add_argument("--apply",   action="store_true")
+    p.add_argument("--target", default=os.getenv("TARGET_CHIP", TARGET))
+    p.add_argument("--apply",  action="store_true")
     a = p.parse_args()
     run_autofix_agent(target=a.target, apply_patches=a.apply)
