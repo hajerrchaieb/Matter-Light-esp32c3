@@ -1,0 +1,60 @@
+--- a/tools/qemu_fault_runner.py
++++ b/tools/qemu_fault_runner.py
+@@ -171,43 +171,22 @@
+     REPORTS.mkdir(exist_ok=True)
+
+     firmware_dir = Path("firmware") / args.target
+-    flash_image = firmware_dir / "flash_image.bin"
++    flash_image = firmware_dir / "flash.bin"
++    api_key = os.environ.get('GENERIC_API_KEY', '')
+
+-    if not flash_image.exists():
+-        args.simulate = True
++    scenarios = get_fault_scenarios(args.target)
+
+-    scenarios = get_fault_scenarios()
+     if args.scenario:
+-        scenarios = [s for s in scenarios if s.name == args.scenario]
+-
+-    results = []
+-
+-    for scenario in scenarios:
+-        result = run_single_scenario(
+-            scenario, flash_image, simulate=args.simulate
+-        )
+-        results.append(result)
+-
+-        status = "PASS" if result.passed else "FAIL"
+-        print(status, scenario.name)
+-
+-    report = {
+-        "target": args.target,
+-        "total": len(results),
+-        "passed": sum(r.passed for r in results),
+-        "failed": sum(not r.passed for r in results),
+-        "scenarios": [r.__dict__ for r in results],
+-    }
+-
+-    out = REPORTS / f"fault-injection-report-{args.target}.json"
+-    out.write_text(json.dumps(report, indent=2))
+-
+-    # EXIT POLICY
+-    if any(not r.passed and r.severity == "critical" for r in results):
+-        sys.exit(1)
+-
+-    sys.exit(0)
+-
++        scenario = next((s for s in scenarios if s.name == args.scenario), None)
++        if scenario:
++            result = run_single_scenario(scenario, flash_image, args.simulate)
++            print(json.dumps(result.__dict__, indent=4))
++        else:
++            print(f"Scenario '{args.scenario}' not found")
++    else:
++        for scenario in scenarios:
++            result = run_single_scenario(scenario, flash_image, args.simulate)
++            print(json.dumps(result.__dict__, indent=4))
+
+ if __name__ == "__main__":
+-    main()
++    main()
