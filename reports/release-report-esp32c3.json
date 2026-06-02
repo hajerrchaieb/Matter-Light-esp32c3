@@ -1,0 +1,13 @@
+{
+  "version": "v141",
+  "target": "esp32c3",
+  "generated_at": "2026-06-02T08:40:17.156593Z",
+  "changelog": "# \u2728 New Features\n* No new features were added in this release.\n* The focus was on maintaining stability and preparing for future updates.\n* Existing Matter protocol support remains unchanged.\n\n# \ud83d\udc1b Bug Fixes\n* No specific bug fixes were applied in this release.\n* General code review and maintenance were performed to prevent future issues.\n* ESP32C3-specific bug fixes were not required in this version.\n\n# \ud83d\udd10 Security\n* Security score remains at 0/10, indicating significant room for improvement.\n* One secret was detected, which is a concern and will be addressed in the next release.\n* No critical CVEs were found, but the overall security posture is still a priority.\n\n# \u26a1 Performance\n* Flash usage is at 43.9%, leaving room for optimization and potential savings.\n* The potential saving of 95 KB was identified, which will be targeted in future releases.\n* Performance metrics for the ESP32C3 remain within expected ranges.\n\n# \ud83d\udd0d Code Quality\n* Code quality review did not identify any major issues.\n* The codebase remains compatible with the latest esp-idf version.\n* Opportunities for improvement were noted, particularly in terms of security and optimization.\n\n# \u2705 Quality Gates\n* The build process was successful, with no major issues encountered.\n* Four tests were generated to validate the firmware's functionality.\n* Quality gates were passed, but the security score indicates a need for additional focus.\n\n# \u26a0\ufe0f Known Issues\n* The security score of 0/10 is a significant known issue that needs to be addressed.\n* The presence of one secret in the codebase is a concern that will be prioritized.\n* No other major known issues were identified in this release.\n\n# \ud83d\udd1c Next Release\n* The next release will focus on improving the security score and addressing the detected secret.\n* Optimization efforts will target the identified potential saving of 95 KB.\n* Additional testing and code review will be performed to ensure the stability and quality of the firmware.",
+  "changelog_file": "reports/CHANGELOG-v141.md",
+  "security_score": 0,
+  "build_status": "success",
+  "patches_applied": 0,
+  "tests_generated": 4,
+  "flash_pct": 43.9,
+  "canary_deploy": "simulated"
+}
