@@ -1,0 +1,48 @@
+{
+  "status": "pass",
+  "total": 5,
+  "passed": 5,
+  "failed": 0,
+  "ignored": 0,
+  "tests": [
+    {
+      "name": "test_on_off_cluster_toggle",
+      "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+      "line": 51,
+      "status": "PASS",
+      "message": ""
+    },
+    {
+      "name": "test_null_endpoint_handled",
+      "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+      "line": 52,
+      "status": "PASS",
+      "message": ""
+    },
+    {
+      "name": "test_invalid_attribute_type",
+      "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+      "line": 53,
+      "status": "PASS",
+      "message": ""
+    },
+    {
+      "name": "test_malloc_exhaustion",
+      "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+      "line": 54,
+      "status": "PASS",
+      "message": ""
+    },
+    {
+      "name": "test_stack_overflow_detection",
+      "file": "esp-matter/examples/light/test/test_light_app_esp32c3.cpp",
+      "line": 55,
+      "status": "PASS",
+      "message": ""
+    }
+  ],
+  "runner": "host",
+  "log_file": "reports/host-test-run.log",
+  "log_lines": 15,
+  "generated_at": "2026-05-31T17:49:15.654912Z"
+}
