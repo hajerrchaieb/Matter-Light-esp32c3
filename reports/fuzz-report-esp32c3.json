@@ -1,0 +1,27 @@
+{
+  "status": "pass",
+  "executions": 134096470,
+  "exec_per_second": 1473587,
+  "coverage_edges": 84,
+  "features": 85,
+  "corpus_size": 21,
+  "crashes": {
+    "count": 0,
+    "files": []
+  },
+  "timeouts": {
+    "count": 0
+  },
+  "leaks": {
+    "count": 0
+  },
+  "oom": {
+    "count": 0
+  },
+  "sanitizer_errors": {
+    "asan": [],
+    "ubsan": []
+  },
+  "total_issues": 0,
+  "summary": "134,096,470 executions at 1,473,587/s \u2014 84 edges covered \u2014 0 issue(s) found"
+}
