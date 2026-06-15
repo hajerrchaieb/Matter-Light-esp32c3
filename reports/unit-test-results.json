@@ -1,0 +1,40 @@
+{
+  "status": "partial",
+  "total": 0,
+  "passed": 0,
+  "failed": 0,
+  "ignored": 0,
+  "generated_at": "2026-06-15T07:33:18.211957Z",
+  "runners": {
+    "host": {
+      "runner": "host",
+      "status": "no_tests_yet",
+      "total": 0,
+      "passed": 0,
+      "failed": 0,
+      "note": "No test file present \u2014 Stage AI will generate one this run"
+    },
+    "qemu": {
+      "runner": "qemu",
+      "status": "skipped",
+      "total": 0,
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "note": "QEMU skipped",
+      "coverage": "QEMU integration covers: real ESP-IDF \u00b7 Matter commissioning \u00b7 NVS persistence \u00b7 FreeRTOS scheduling.",
+      "boot_test": {
+        "status": "pass",
+        "boot_success": true,
+        "matter_started": true,
+        "panics": 0,
+        "watchdogs": 0,
+        "summary": "Boot: OK | Panics: 0 | Status: PASS"
+      }
+    }
+  },
+  "summary": "host=no_tests_yet qemu=skipped -> canonical=partial (0/0 passed, 0 failed, 0 ignored)",
+  "test_lines": [],
+  "note": "No test file present \u2014 Stage AI will generate one this run",
+  "tests": []
+}
