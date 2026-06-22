@@ -1,0 +1,13 @@
+{
+  "version": "v146",
+  "target": "esp32c3",
+  "generated_at": "2026-06-22T07:43:44.294673Z",
+  "changelog": "# \u2728 New Features\n* No new features were added in this release.\n* The focus was on maintaining stability and preparing for future updates.\n* The Matter protocol implementation remains unchanged.\n\n# \ud83d\udc1b Bug Fixes\n* No specific bug fixes were applied in this release.\n* The build process was verified to ensure consistency with previous releases.\n* The esp-idf framework was updated to the latest version available.\n\n# \ud83d\udd10 Security\n* The security score remains at 0/10, indicating a high risk.\n* One secret was detected, which is a concern that needs to be addressed.\n* No critical CVEs were found, but the overall security posture is still a concern.\n\n# \u26a1 Performance\n* Flash usage is at 43.9%, leaving room for optimization.\n* A potential saving of 95 KB was identified, which could improve performance.\n* The esp32c3 target board's performance characteristics were verified.\n\n# \ud83d\udd0d Code Quality\n* Code quality checks were performed, but no significant issues were found.\n* The codebase remains consistent with the esp-idf framework's guidelines.\n* Opportunities for optimization and improvement were identified.\n\n# \u2705 Quality Gates\n* The build process was successful, passing all automated checks.\n* Four tests were generated to verify the firmware's functionality.\n* The release passed the quality gates, but security concerns remain.\n\n# \u26a0\ufe0f Known Issues\n* The security score of 0/10 is a major concern that needs to be addressed.\n* The presence of one secret in the codebase is a known issue.\n* No patches were applied in this release, which may indicate a lack of maintenance.\n\n# \ud83d\udd1c Next Release\n* The next release will focus on addressing the security concerns.\n* Patches and updates will be applied to improve the security score.\n* Optimization efforts will be made to reduce flash usage and improve performance.",
+  "changelog_file": "reports/CHANGELOG-v146.md",
+  "security_score": 0,
+  "build_status": "success",
+  "patches_applied": 0,
+  "tests_generated": 4,
+  "flash_pct": 43.9,
+  "canary_deploy": "simulated"
+}

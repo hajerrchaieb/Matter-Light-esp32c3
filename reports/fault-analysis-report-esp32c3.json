@@ -1,0 +1,77 @@
+{
+  "target": "esp32c3",
+  "robustness_score": 7,
+  "score_justification": "The esp32c3 scored 7 out of 10 due to passing 9 out of 10 fault injection scenarios. The only critical failure was the stack_overflow_trigger scenario, which resulted in a crash instead of the expected reboot. The high failures list is empty, indicating that no high-severity failures occurred.",
+  "failed_scenarios_analysis": [
+    {
+      "scenario": "stack_overflow_trigger",
+      "family": "memory",
+      "cwe": "CWE-121",
+      "root_cause": "inadequate stack size or improper stack usage",
+      "fix_code": "increase stack size or optimize stack usage to prevent overflow",
+      "effort": "medium"
+    }
+  ],
+  "passed_scenarios_highlights": [
+    {
+      "scenario": "nvs_magic_corruption",
+      "why_good": "correctly calls nvs_flash_erase() to handle corruption"
+    },
+    {
+      "scenario": "nvs_write_interrupted",
+      "why_good": "properly handles interrupted writes to prevent data corruption"
+    },
+    {
+      "scenario": "matter_onoff_invalid_value",
+      "why_good": "correctly handles invalid values to prevent unexpected behavior"
+    }
+  ],
+  "family_assessments": {
+    "memory": {
+      "score": 6,
+      "verdict": "NEEDS_IMPROVEMENT",
+      "top_recommendation": "Implement stack overflow protection mechanisms"
+    },
+    "nvs": {
+      "score": 8,
+      "verdict": "GOOD",
+      "top_recommendation": "Continue to use nvs_flash_erase() to handle corruption"
+    },
+    "matter": {
+      "score": 7,
+      "verdict": "ACCEPTABLE",
+      "top_recommendation": "Improve error handling for invalid values"
+    }
+  },
+  "priority_fixes": [
+    "1. [CRITICAL] Fix stack overflow trigger by increasing stack size or optimizing stack usage",
+    "2. [HIGH] Improve error handling for invalid values in matter scenarios",
+    "3. [MEDIUM] Implement additional checks for NULL pointers after allocation"
+  ],
+  "overall_verdict": "NEEDS_IMPROVEMENT",
+  "summary": "The esp32c3 demonstrated a robustness score of 7, with one critical failure and no high-severity failures. While the device performed well in most scenarios, improvements are needed to address the stack overflow trigger and enhance overall robustness.",
+  "fault_runner_summary": {
+    "total": 10,
+    "passed": 9,
+    "failed": 1,
+    "status": "critical_fail",
+    "by_family": {
+      "memory": {
+        "total": 4,
+        "passed": 3,
+        "failed": 1
+      },
+      "nvs": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      },
+      "matter": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0
+      }
+    }
+  },
+  "analysis_timestamp": "2026-06-22T07:43:04.637973"
+}
