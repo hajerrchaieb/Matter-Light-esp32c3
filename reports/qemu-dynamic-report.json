@@ -1,0 +1,18 @@
+{
+  "target": "esp32c3",
+  "boot_success": true,
+  "app_started": true,
+  "matter_started": true,
+  "panics": [],
+  "heap_errors": [],
+  "watchdog_triggers": [],
+  "stack_overflows": [],
+  "reboots": 1,
+  "warnings": [
+    "W (376) rmt(legacy): legacy driver is deprecated, please migrate to `driver/rmt_tx.h` and/or `driver/rmt_rx.h`"
+  ],
+  "log_lines": 162,
+  "critical_count": 0,
+  "status": "pass",
+  "summary": "Boot: OK | Panics: 0 | Status: PASS"
+}
