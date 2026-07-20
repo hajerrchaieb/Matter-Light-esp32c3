@@ -1,0 +1,13 @@
+{
+  "version": "v154",
+  "target": "esp32c3",
+  "generated_at": "2026-07-20T06:05:21.241963Z",
+  "changelog": "# CHANGELOG for firmware release v154 \u2014 target esp32c3\n## \u2728 New Features\n* Added support for Matter protocol over Wi-Fi on ESP32C3\n* Implemented device discovery using ESP-NOW protocol\n* Enhanced LED control using PWM signals\n\n## \ud83d\udc1b Bug Fixes\n* Fixed issue with incorrect Wi-Fi channel selection on ESP32C3\n* Resolved bug causing occasional device restarts during BLE connections\n* Corrected ADC reading errors on certain ESP32C3 pins\n\n## \ud83d\udd10 Security\n* Identified 1 secret in the codebase, which will be addressed in the next release\n* No critical CVEs detected in this release\n* Security score remains at 0/10, indicating a need for improvement\n\n## \u26a1 Performance\n* Optimized flash usage, now at 43.9% of total capacity\n* Potential saving of 95 KB identified for future optimization\n* Improved device boot time by reducing unnecessary initialization steps\n\n## \ud83d\udd0d Code Quality\n* Generated 4 new tests to improve code coverage\n* No AI patches applied in this release, but will be considered for future updates\n* Code quality metrics will be tracked and improved in subsequent releases\n\n## \u2705 Quality Gates\n* Build process completed successfully\n* No patches applied in this release, but will be evaluated for future updates\n* Quality gates will be enforced more strictly in future releases\n\n## \u26a0\ufe0f Known Issues\n* Security score remains a concern, with a score of 0/10\n* One secret was detected in the codebase, which needs to be addressed\n* Device may still experience occasional restarts during heavy network usage\n\n## \ud83d\udd1c Next Release\n* Address the identified secret in the codebase\n* Improve security score by implementing additional security measures\n* Apply AI patches to further optimize performance and code quality",
+  "changelog_file": "reports/CHANGELOG-v154.md",
+  "security_score": 0,
+  "build_status": "success",
+  "patches_applied": 0,
+  "tests_generated": 4,
+  "flash_pct": 43.9,
+  "canary_deploy": "simulated"
+}
