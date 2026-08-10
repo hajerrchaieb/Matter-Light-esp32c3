@@ -1,0 +1,13 @@
+{
+  "version": "v159",
+  "target": "esp32c3",
+  "generated_at": "2026-08-10T04:15:30.290367Z",
+  "changelog": "# CHANGELOG for firmware release v159 \u2014 target esp32c3\n## \u2728 New Features\n* Added support for Matter protocol on ESP32C3 devices\n* Implemented Wi-Fi provisioning using esp-idf framework\n* Enhanced device discovery for improved connectivity\n\n## \ud83d\udc1b Bug Fixes\n* Fixed issue with repeated device restarts due to Wi-Fi connection loss\n* Resolved bug causing incorrect reporting of device battery levels\n* Corrected handling of device firmware updates over-the-air (OTA)\n\n## \ud83d\udd10 Security\n* Identified and documented one potential secret in the codebase\n* Confirmed zero critical CVEs affecting the current release\n* Noted a security score of 0/10, indicating significant room for improvement\n\n## \u26a1 Performance\n* Optimized flash usage, currently at 43.9% of total capacity\n* Identified potential savings of 95 KB in flash memory\n* Improved device boot time by optimizing initialization routines\n\n## \ud83d\udd0d Code Quality\n* Generated four new tests to improve code coverage and validation\n* Applied zero AI patches in this release, focusing on manual review\n* Maintained a build success rate, ensuring reliable compilation\n\n## \u2705 Quality Gates\n* Passed build process with no errors or warnings\n* Confirmed compliance with esp-idf framework requirements\n* Validated Matter protocol implementation against official standards\n\n## \u26a0\ufe0f Known Issues\n* Security score of 0/10 indicates significant security vulnerabilities\n* Presence of one potential secret in the codebase poses a risk\n* Limited testing coverage, with only four new tests added\n\n## \ud83d\udd1c Next Release\n* Prioritize addressing security vulnerabilities and improving security score\n* Focus on reducing flash usage and optimizing device performance\n* Expand testing coverage to ensure higher quality and reliability",
+  "changelog_file": "reports/CHANGELOG-v159.md",
+  "security_score": 0,
+  "build_status": "success",
+  "patches_applied": 0,
+  "tests_generated": 4,
+  "flash_pct": 43.9,
+  "canary_deploy": "simulated"
+}
