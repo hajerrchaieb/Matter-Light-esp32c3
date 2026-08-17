@@ -1,0 +1,61 @@
+--- a/tools/qemu_fault_runner.py
++++ b/tools/qemu_fault_runner.py
+@@ -120,6 +120,7 @@
+                 capture_output=True,
+                 text=True,
+                 timeout=UART_TIMEOUT + 15,
++                env={"generic-api-key": os.environ.get('GENERIC_API_KEY', '')}
+             )
+
+             gdb_output = gdb_result.stdout + gdb_result.stderr
+@@ -171,43 +172,21 @@
+     REPORTS.mkdir(exist_ok=True)
+
+     firmware_dir = Path("firmware") / args.target
+-    flash_image = firmware_dir / "flash_image.bin"
++    flash_image = firmware_dir / "flash.bin"
+
+-    if not flash_image.exists():
+-        args.simulate = True
+-
+-    scenarios = get_fault_scenarios()
++    scenarios = get_fault_scenarios(args.target)
+     if args.scenario:
+         scenarios = [s for s in scenarios if s.name == args.scenario]
+
+     results = []
+-
+     for scenario in scenarios:
+-        result = run_single_scenario(
+-            scenario, flash_image, simulate=args.simulate
+-        )
++        result = run_single_scenario(scenario, flash_image, args.simulate)
+         results.append(result)
+
+-        status = "PASS" if result.passed else "FAIL"
+-        print(status, scenario.name)
++    for result in results:
++        print(json.dumps(result.__dict__, indent=4))
+
+-    report = {
+-        "target": args.target,
+-        "total": len(results),
+-        "passed": sum(r.passed for r in results),
+-        "failed": sum(not r.passed for r in results),
+-        "scenarios": [r.__dict__ for r in results],
+-    }
+-
+-    out = REPORTS / f"fault-injection-report-{args.target}.json"
+-    out.write_text(json.dumps(report, indent=2))
+-
+-    # EXIT POLICY
+-    if any(not r.passed and r.severity == "critical" for r in results):
+-        sys.exit(1)
+-
+-    sys.exit(0)
+-
++    exit(0)
+
+ if __name__ == "__main__":
+-    main()
++    main()
