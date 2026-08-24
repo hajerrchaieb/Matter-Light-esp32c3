@@ -1,0 +1,93 @@
+
+============================================================
+NODE: Code Review Agent
+
+=======================================================
+🔵 CODE REVIEW AGENT — Stage 1
+📁 Source : ../esp-matter/examples/light/main
+🎯 Target : esp32c3
+=======================================================
+  📁 Source found at: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main
+
+📖 Reading source files...
+  ✅ Read: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main/app_main.cpp (11481 chars)
+  ✅ Read: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main/app_driver.cpp (7561 chars)
+  ✅ Read: /home/runner/work/Matter-Light-esp32c3/Matter-Light-esp32c3/esp-matter/examples/light/main/app_priv.h (3375 chars)
+
+⚡ Reviewing code with Groq...
+
+[Orchestrator] Code Review failed: Error code: 404 - {'error': {'message': 'The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'code': 'model_not_found'}}
+
+============================================================
+NODE: Security Agent
+
+[Security Agent] Starting analysis for target: esp32c3
+[Security Agent] Deterministic score: 0/10  (unique_secrets=15 critCVE=0 highCVE=0 mutableTag=True slsa=True)
+[Security Agent] Calling Groq LLM...
+[Orchestrator] Security failed: Error code: 404 - {'error': {'message': 'The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'code': 'model_not_found'}}
+
+============================================================
+NODE: Debug Agent
+
+[Debug Agent] Starting analysis for target: esp32c3
+[Debug Agent] Build log truncated to last 6000 chars
+[Debug Agent] Calling Groq LLM...
+[Orchestrator] Debug failed: Error code: 404 - {'error': {'message': 'The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'code': 'model_not_found'}}
+
+============================================================
+NODE: Fault Analysis Agent
+
+[Fault Analysis Agent] Starting for esp32c3
+[Orchestrator] Fault Analysis failed: Error code: 404 - {'error': {'message': 'The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'code': 'model_not_found'}}
+
+============================================================
+NODE: Test Generation Agent
+
+[Test Gen Agent] Starting for target: esp32c3
+[Test Gen Agent] Calling Groq LLM...
+[Orchestrator] TestGen failed: Error code: 404 - {'error': {'message': 'The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'code': 'model_not_found'}}
+
+============================================================
+NODE: Optimization + Release Agent
+
+[Optimization Agent] Starting for target: esp32c3
+[Optimization Agent] Calling Groq LLM for memory analysis...
+[Orchestrator] Optimization failed: Error code: 404 - {'error': {'message': 'The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'code': 'model_not_found'}}
+
+============================================================
+NODE: AutoFix Agent
+
+[AutoFix] ===== target:esp32c3 LLM:True =====
+[AutoFix] ESP source dir: esp-matter/examples/light/main
+[AutoFix] FIX 5 — 0 issues from agents → injecting all-in-one fix for demo/intentional_bug.py
+[AutoFix] Collected: 1 unique issues (0 duplicates dropped) | 1 security · 0 code_review · 0 debug · 0 fault
+[AutoFix] Total issues: 1
+[AutoFix] #1: [CRITICAL] all-in-one fix → demo/intentional_bug.py
+          → ✅ patch valide
+          → SAUVEGARDÉ: autofix-esp32c3-01-security-demo_intentional_bug.py.patch [rule_based_all_in_one]
+
+[AutoFix] patches=1 | manual=0
+[AutoFix] Rapport: reports/autofix-report-esp32c3.json
+[Orchestrator] AutoFix: 1 patch(es)
+
+============================================================
+NODE: Pipeline Summary
+[Orchestrator] Tests exécutés : 5/5 passed — status=partial
+[Orchestrator] OTA: version=v163 checksums=4 deploy=simulated manifest=yes
+[Orchestrator] Security score corrigé : 0/10 → 7/10 (aucune menace réelle)
+
+╔══════════════════════════════════════════════════════╗
+║ Code Review : N/A/10
+║ Security    : 7/10  CVEs=0  Real secrets=0  FP secrets (patches)=0
+║ Build       : success
+║ Tests       : gen=0  run=5/5  partial
+║ Fault Inject: 9/10  critical_fail
+║ Memory      : Flash N/A%
+║ Robustness  : N/A/10  Dynamic=0/10
+║ HIL Tests   : 0/0  status=not_run  device=esp32c3-qemu-proxy
+║ OTA Deploy  : simulated  version=v163  manifest=yes
+║ AutoFix     : 1 patch(es)  agents=1/7
+║ Overall     : PASSED ✅
+║ Block reason: none
+╚══════════════════════════════════════════════════════╝
+[Orchestrator] pipeline-summary.json + pr-comment-body.md sauvegardés
