@@ -1,0 +1,25 @@
+{
+  "agent": "autofix_agent",
+  "target": "esp32c3",
+  "generated_at": "2026-09-07T07:24:53.567006Z",
+  "llm_used": true,
+  "issues_analyzed": 1,
+  "patches_generated": 1,
+  "patch_files": [
+    "autofix-esp32c3-01-security-demo_intentional_bug.py.patch"
+  ],
+  "patches_detail": [
+    {
+      "patch_name": "autofix-esp32c3-01-security-demo_intentional_bug.py.patch",
+      "file": "demo/intentional_bug.py",
+      "source_agent": "security",
+      "severity": "critical",
+      "description": "All-in-one fix: (1) CWE-798 hardcoded DEMO_API_KEY secret \u2014 replace with os.environ.get. (2) CWE-369 division by zero in compute_ratio \u2014 add zero guard. (3) CWE-476 None dereference in process_data \u2014 ",
+      "fix_method": "rule_based_all_in_one",
+      "valid": true
+    }
+  ],
+  "manual_instructions": [],
+  "status": "patches_generated",
+  "summary": "1 patch(es) g\u00e9n\u00e9r\u00e9s | 0 manuels."
+}

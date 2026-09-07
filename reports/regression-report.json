@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-09-07T07:24:53.877486",
+  "target": "esp32c3",
+  "version": "v166",
+  "threshold": 2.0,
+  "has_previous": false,
+  "status": "baseline",
+  "regressions": [],
+  "improvements": [],
+  "current": {
+    "code_quality": "N/A",
+    "security": 7.0,
+    "robustness": "N/A",
+    "dynamic_score": null,
+    "flash_pct": "N/A",
+    "tests_count": null
+  },
+  "previous": {},
+  "run_history_count": 1,
+  "summary": "No previous run \u2014 baseline established"
+}
