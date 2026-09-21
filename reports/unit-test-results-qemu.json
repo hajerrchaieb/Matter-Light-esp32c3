@@ -1,0 +1,18 @@
+{
+  "runner": "qemu",
+  "status": "skipped",
+  "total": 0,
+  "passed": 0,
+  "failed": 0,
+  "ignored": 0,
+  "note": "QEMU skipped",
+  "coverage": "QEMU integration covers: real ESP-IDF \u00b7 Matter commissioning \u00b7 NVS persistence \u00b7 FreeRTOS scheduling.",
+  "boot_test": {
+    "status": "pass",
+    "boot_success": true,
+    "matter_started": true,
+    "panics": 0,
+    "watchdogs": 0,
+    "summary": "Boot: OK | Panics: 0 | Status: PASS"
+  }
+}
