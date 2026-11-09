@@ -1,0 +1,8 @@
+{
+  "runner": "host",
+  "status": "no_tests_yet",
+  "total": 0,
+  "passed": 0,
+  "failed": 0,
+  "note": "No test file present \u2014 Stage AI will generate one this run"
+}
